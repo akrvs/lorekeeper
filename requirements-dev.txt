@@ -1,0 +1,8 @@
+# Development / CI tooling (NOT required at runtime; kept out of requirements.txt
+# so the production image stays lean).
+ruff==0.15.15
+
+# Test framework (Track 2)
+pytest>=8.3,<9
+pytest-asyncio>=0.24,<0.26
+pytest-mock>=3.14,<4

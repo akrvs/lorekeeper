@@ -1,0 +1,80 @@
+name: company-brain
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: company-brain-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-brain}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-brain}
+      POSTGRES_DB: ${POSTGRES_DB:-company_brain}
+    ports:
+      # Exposed for local inspection (psql / DBeaver). Remove on hardened VMs.
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Runs ONCE on an empty data dir: guarantees extensions exist before the
+      # app issues any DDL that references the `vector` type.
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-brain} -d ${POSTGRES_DB:-company_brain}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: company-brain-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Inside the compose network the DB is reachable by service name.
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${API_PORT:-8000}:8000"
+    # Hot-reload the source in dev. Drop the volume + --reload for production.
+    volumes:
+      - ./app:/app/app:ro
+    command: >
+      uvicorn app.main:app
+      --host 0.0.0.0
+      --port 8000
+      --reload
+
+  # ---------------------------------------------------------------------------
+  # MCP server (Step 3) — stdio transport for Cursor / Claude Desktop / Windsurf.
+  #
+  # Behind the "mcp" profile so `docker compose up` does NOT daemonize it (a
+  # stdio server is meaningless without a client owning its stdin/stdout). The
+  # MCP client launches it on demand, e.g.:
+  #     docker compose run --rm -T mcp
+  # ---------------------------------------------------------------------------
+  mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    profiles: ["mcp"]
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+    depends_on:
+      db:
+        condition: service_healthy
+    stdin_open: true   # keep stdin open for the JSON-RPC stream
+    tty: false         # raw stream, not a terminal
+    command: ["python", "-m", "app.mcp.server"]
+
+volumes:
+  pgdata:
+    driver: local

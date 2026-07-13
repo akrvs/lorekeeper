@@ -1,0 +1,90 @@
+name: company-brain-prod
+
+# Production topology for a Linux VM.
+# Differences from docker-compose.yml (dev):
+#   * restart: always on long-running services
+#   * NO host port for the database — it is reachable only on the internal network
+#   * NO source-code bind mounts, NO --reload (runs the baked image CMD)
+#   * NO db init mount — the Alembic migration creates the pgvector/pg_trgm extensions
+#   * required secrets fail fast if unset (${VAR:?message})
+#
+# Usage:  docker compose -f docker-compose.prod.yml up --build -d
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-company_brain}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # Intentionally no `ports:` — the database is private to the compose network.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB:-company_brain}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: company-brain:latest
+    restart: always
+    # All secrets (Azure OpenAI creds, GitHub/Slack tokens) pass through from .env.
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${API_PORT:-8000}:8000"
+    # Uses the image CMD (uvicorn, single worker, no --reload). The FastAPI
+    # lifespan applies `alembic upgrade head` before serving traffic.
+
+  # MCP server — launched on demand by the agent client over stdio, e.g.:
+  #   docker compose -f docker-compose.prod.yml run --rm -T mcp
+  mcp:
+    image: company-brain:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    profiles: ["mcp"]
+    restart: "no"
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+    depends_on:
+      db:
+        condition: service_healthy
+    stdin_open: true
+    tty: false
+    command: ["python", "-m", "app.mcp.server"]
+
+  # Optional cache backend (Track 3). Enable with CACHE_BACKEND=redis and start
+  # via the "cache" profile:  docker compose -f docker-compose.prod.yml --profile cache up -d
+  redis:
+    image: redis:7-alpine
+    profiles: ["cache"]
+    restart: always
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
+    driver: local
+  redisdata:
+    driver: local

@@ -1,0 +1,33 @@
+# ---------------------------------------------------------------------------
+# Step 1 — Backend + data layer (used now)
+# ---------------------------------------------------------------------------
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+sqlalchemy==2.0.36
+psycopg[binary]==3.2.3          # psycopg3 driver, bundles libpq
+pgvector==0.3.6                 # SQLAlchemy Vector type + ops
+pydantic==2.10.4
+pydantic-settings==2.7.0
+tenacity==9.0.0                 # startup retry while DB warms up
+alembic==1.14.0                 # reserved for production migrations (Step 2+)
+
+# ---------------------------------------------------------------------------
+# Step 2 — Extraction engine + Azure OpenAI
+# ---------------------------------------------------------------------------
+# Pinned to the 1.x line on purpose: that's where the structured-output helper
+# `client.beta.chat.completions.parse()` lives (added in 1.40; 2.x reorganizes it).
+openai>=1.59,<2
+httpx>=0.28,<1
+PyGithub>=2.5,<3
+slack-sdk>=3.33,<4
+
+# ---------------------------------------------------------------------------
+# Step 3 — MCP server
+# ---------------------------------------------------------------------------
+mcp>=1.2,<2
+
+# ---------------------------------------------------------------------------
+# Phase 7 — optional Redis cache backend (used only when CACHE_BACKEND=redis;
+# imported lazily, so the default in-memory path never needs it).
+# ---------------------------------------------------------------------------
+redis>=5,<6

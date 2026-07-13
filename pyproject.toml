@@ -1,0 +1,36 @@
+[project]
+name = "company-brain"
+version = "0.1.0"
+description = "Organizational memory layer for AI agents — ontology-backed knowledge graph exposed via MCP."
+requires-python = ">=3.12"
+readme = "README.md"
+# Runtime dependencies are pinned in requirements.txt (used by the Dockerfile
+# for deterministic, well-cached image builds). This file holds project
+# metadata + tooling config only.
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+# Alembic revision files are generated; don't lint their formatting.
+extend-exclude = ["alembic/versions"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# Verification scripts carry long inline fixtures / query expressions.
+"tests/*" = ["E501"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency-injection idiom uses a call in the default argument.
+extend-immutable-calls = ["fastapi.Depends"]
+
+[tool.ruff.lint.isort]
+# The local ./alembic migrations dir shares a name with the installed package;
+# classify the package explicitly so imports group consistently.
+known-third-party = ["alembic"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+asyncio_mode = "auto"
