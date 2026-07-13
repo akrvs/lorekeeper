@@ -19,7 +19,10 @@ from app.cache import get_cache
 from app.db.init_db import init_db
 from app.db.session import SessionLocal, engine
 
-_TABLES = "node_mentions, edges, nodes, raw_documents, ingestion_runs, audit_log, access_grants"
+_TABLES = (
+    "node_mentions, edges, nodes, raw_documents, ingestion_runs, "
+    "audit_log, access_grants, proposals"
+)
 
 
 def _db_reachable() -> bool:

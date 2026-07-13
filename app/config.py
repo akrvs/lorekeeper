@@ -74,6 +74,12 @@ class Settings(BaseSettings):
     cache_ttl_seconds: int = 60
     redis_url: str = "redis://redis:6379/0"
 
+    # --- Proposals / self-maintenance ----------------------------------------
+    # Proposals at/above this confidence apply without human review (still
+    # audited + rollback-able). None (the default) disables autonomy entirely:
+    # every proposal waits in the review queue.
+    proposal_auto_apply_threshold: float | None = None
+
     # --- Connectors (Track 4) -----------------------------------------------
     local_root: str | None = None
     local_scan_concurrency: int = 16

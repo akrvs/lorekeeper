@@ -38,7 +38,11 @@ class GraphRepository:
     # -- reads -------------------------------------------------------------
     def semantic_search(self, qvec, node_type: str | None, limit: int):
         distance = Node.embedding.cosine_distance(qvec).label("distance")
-        stmt = select(Node, distance).where(Node.embedding.is_not(None))
+        # Merged duplicates (canonical_node_id set) stay in the table as aliases
+        # for the resolver, but must not surface as separate search results.
+        stmt = select(Node, distance).where(
+            Node.embedding.is_not(None), Node.canonical_node_id.is_(None)
+        )
         if node_type:
             stmt = stmt.where(Node.node_type == node_type)
         stmt = self._restrict(stmt).order_by(distance).limit(limit)
