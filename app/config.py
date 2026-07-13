@@ -79,6 +79,12 @@ class Settings(BaseSettings):
     # audited + rollback-able). None (the default) disables autonomy entirely:
     # every proposal waits in the review queue.
     proposal_auto_apply_threshold: float | None = None
+    # Dedup agent candidate bands — deliberately looser than the resolver's
+    # insert-time auto-merge thresholds (0.55 / 0.15): the gray band goes to a
+    # human instead of being merged silently.
+    dedup_name_threshold: float = 0.45
+    dedup_vec_threshold: float = 0.25
+    dedup_scan_limit: int = 100  # max candidate pairs per run
 
     # --- Connectors (Track 4) -----------------------------------------------
     local_root: str | None = None

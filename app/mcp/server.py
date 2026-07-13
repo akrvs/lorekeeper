@@ -50,7 +50,10 @@ mcp = FastMCP(
         "documents/URLs behind it; (3) get_node_neighbors to see what it directly connects "
         "to; (4) traverse_graph_path to find multi-hop connections between two kinds of "
         "things. Pass principal_token to scope results to a user's permissions. "
-        "Node ids are UUIDs returned by these tools."
+        "Node ids are UUIDs returned by these tools. The graph maintains itself: "
+        "agents file change proposals (duplicate merges, ...) that you can inspect "
+        "with review_proposals and decide with approve_proposal / reject_proposal; "
+        "rollback_proposal undoes an applied change."
     ),
 )
 
@@ -346,6 +349,123 @@ def traverse_graph_path(
         out.append(f"- {tname}  ({ttype})  id={tid}  [{depth} hop(s)]")
         out.append("    " + _render_path(name_path, rel_path))
     return "\n".join(out)
+
+
+# --------------------------------------------------------------------------- #
+# Self-maintenance: the proposal review queue
+# --------------------------------------------------------------------------- #
+def _reviewer(db, token):
+    """Resolve the principal and gate write access to the proposal queue.
+    With RBAC off this is the anonymous superuser (open-source default)."""
+    principal = _principal(db, token)
+    if settings.rbac_enabled and not principal.superuser:
+        raise PermissionError("proposal review requires a superuser principal")
+    return principal
+
+
+def _proposal_line(p) -> str:
+    detail = json.dumps(p.payload, ensure_ascii=False)
+    if p.kind == "entity_merge" and p.evidence:
+        loser = p.evidence.get("loser", {}).get("name", "?")
+        winner = p.evidence.get("winner", {}).get("name", "?")
+        detail = f"merge '{loser}' -> '{winner}'"
+    return (
+        f"- id={p.id}  [{p.kind}]  confidence={p.confidence:.2f}  "
+        f"agent={p.agent}  status={p.status}\n    {detail}"
+    )
+
+
+@mcp.tool()
+def review_proposals(
+    status: str = "pending", limit: int = 20, principal_token: str | None = None
+) -> str:
+    """List self-maintenance proposals filed by the graph's agents.
+
+    Lorekeeper's maintenance agents (dedup, drift, staleness) never edit the
+    graph directly — they file proposals here. Inspect the queue, then use
+    approve_proposal / reject_proposal to decide, or rollback_proposal to undo.
+
+    Args:
+        status: 'pending' (default), 'applied', 'auto_applied', 'rejected',
+            'rolled_back', 'failed', or 'all'.
+        limit: Max proposals to list (default 20).
+        principal_token: Optional identity token (RBAC: superuser only).
+    """
+    from sqlalchemy import select
+
+    from app.db.models.proposal import Proposal
+
+    limit = max(1, min(int(limit), 100))
+    with SessionLocal() as db:
+        try:
+            principal = _reviewer(db, principal_token)
+        except PermissionError as exc:
+            return f"ERROR: authorization failed ({exc})."
+        stmt = select(Proposal).order_by(Proposal.confidence.desc(), Proposal.created_at)
+        if status != "all":
+            stmt = stmt.where(Proposal.status == status)
+        rows = db.scalars(stmt.limit(limit)).all()
+        AuditLogger(db).record(principal, "review_proposals", {"status": status}, [])
+        if not rows:
+            return f"The proposal queue is clean — no '{status}' proposals."
+        header = f"{len(rows)} '{status}' proposal(s), highest confidence first:\n"
+        return header + "\n".join(_proposal_line(p) for p in rows)
+
+
+def _decide_proposal(action: str, proposal_id: str, principal_token: str | None) -> str:
+    from app.proposals import ProposalEngine, ProposalError
+
+    pid = _parse_uuid(proposal_id)
+    if pid is None:
+        return f"ERROR: '{proposal_id}' is not a valid UUID."
+    with SessionLocal() as db:
+        try:
+            principal = _reviewer(db, principal_token)
+        except PermissionError as exc:
+            return f"ERROR: authorization failed ({exc})."
+        engine_ = ProposalEngine(db)
+        try:
+            proposal = getattr(engine_, action)(pid, reviewed_by=principal.subject)
+        except ProposalError as exc:
+            return f"ERROR: {exc}"
+        AuditLogger(db).record(principal, f"{action}_proposal", {"proposal_id": proposal_id}, [])
+        return f"OK: proposal {proposal.id} ({proposal.kind}) is now '{proposal.status}'."
+
+
+@mcp.tool()
+def approve_proposal(proposal_id: str, principal_token: str | None = None) -> str:
+    """Apply a pending self-maintenance proposal to the graph.
+
+    The change is validated against the current graph, applied atomically, and
+    a rollback snapshot is stored — rollback_proposal undoes it exactly.
+
+    Args:
+        proposal_id: UUID from review_proposals.
+        principal_token: Optional identity token (RBAC: superuser only).
+    """
+    return _decide_proposal("approve", proposal_id, principal_token)
+
+
+@mcp.tool()
+def reject_proposal(proposal_id: str, principal_token: str | None = None) -> str:
+    """Reject a pending proposal. Sticky: agents will never re-file the same change.
+
+    Args:
+        proposal_id: UUID from review_proposals.
+        principal_token: Optional identity token (RBAC: superuser only).
+    """
+    return _decide_proposal("reject", proposal_id, principal_token)
+
+
+@mcp.tool()
+def rollback_proposal(proposal_id: str, principal_token: str | None = None) -> str:
+    """Undo an applied/auto-applied proposal from its snapshot, restoring the prior graph.
+
+    Args:
+        proposal_id: UUID of an applied proposal.
+        principal_token: Optional identity token (RBAC: superuser only).
+    """
+    return _decide_proposal("rollback", proposal_id, principal_token)
 
 
 def main() -> None:

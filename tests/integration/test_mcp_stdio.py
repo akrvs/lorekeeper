@@ -11,8 +11,12 @@ from app.db.models import Node
 from app.db.session import SessionLocal
 
 _EXPECTED_TOOLS = [
+    "approve_proposal",
     "get_node_details",
     "get_node_neighbors",
+    "reject_proposal",
+    "review_proposals",
+    "rollback_proposal",
     "semantic_search",
     "traverse_graph_path",
 ]

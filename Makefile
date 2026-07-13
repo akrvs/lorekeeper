@@ -1,4 +1,4 @@
-.PHONY: up down logs ps psql rebuild clean mcp ingest sync-github sync-slack demo demo-down
+.PHONY: up down logs ps psql rebuild clean mcp ingest sync-github sync-slack demo demo-down groom review
 
 DEMO_NET := company-brain-demo-net
 DEMO_DB  := company-brain-demo-db
@@ -29,6 +29,12 @@ sync-slack:    ## Live Slack sync via CLI, e.g. `make sync-slack CHANNEL=C012345
 
 mcp:           ## Launch the MCP server over stdio (what an MCP client runs)
 	docker compose run --rm -T mcp
+
+groom:         ## Run the maintenance agents (dedup, ...) — files proposals
+	docker compose run --rm -T api python -m app.agents.run $(if $(AGENT),--agent $(AGENT))
+
+review:        ## Show the proposal queue; e.g. `make review ARGS="approve 1a2b3c4d"`
+	docker compose run --rm -T api python -m app.review $(or $(ARGS),list)
 
 rebuild:       ## Force a clean image rebuild
 	docker compose build --no-cache

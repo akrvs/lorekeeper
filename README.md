@@ -26,7 +26,7 @@
 ![difficulty](https://img.shields.io/badge/difficulty-Hard-red)
 ![python](https://img.shields.io/badge/python-3.12-blue)
 ![db](https://img.shields.io/badge/postgres-16%20%2B%20pgvector-blue)
-![tests](https://img.shields.io/badge/tests-39%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-46%20passing-brightgreen)
 ![license](https://img.shields.io/badge/license-Apache--2.0-green)
 
 ```
@@ -36,7 +36,7 @@
 │ stack      : Python · FastAPI · SQLAlchemy · Postgres+pgvector  │
 │ interfaces : MCP (stdio) · REST · CLI                           │
 │ flags      : user [query the graph]  root [graph grooms itself] │
-│ status     : ACTIVE — 7 connectors · 4 MCP tools · 39 tests     │
+│ status     : ACTIVE — 7 connectors · 8 MCP tools · 46 tests     │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -135,6 +135,10 @@ The agent flow: `semantic_search` → `traverse_graph_path` → `get_node_detail
 → cite. Ask it: *"Which Slack threads discuss the feature that caused the
 deploy failure in this repo?"* — and get receipts.
 
+Four more tools — `review_proposals`, `approve_proposal`, `reject_proposal`,
+`rollback_proposal` — expose the maintenance queue, so you can groom the graph
+without leaving your MCP client. That's the root flag:
+
 ## [ Root Flag ] — the graph grooms itself
 
 The reason ontologies die: ~1 FTE per 50–100 entity types just to fight drift.
@@ -159,9 +163,23 @@ maintenance agents ──▶ proposals (pending) ──▶ human approves ──
   a proposal row: audited, reversible.
 - Rejections are **sticky**: the dedup key stops agents from re-filing a merge
   a human already said no to.
+- **The dedup agent** hunts what the insert-time resolver structurally can't:
+  cross-source duplicates (GitHub `alice` ≡ Slack `alice` — both sourced, never
+  compared) and gray-band near-misses below the auto-merge thresholds. Each
+  proposal carries the evidence (trigram similarity, cosine distance, mention
+  counts) a reviewer needs.
 
-*In progress: dedup/drift/staleness agents, LLM-assisted schema bootstrap, and
-proposal review straight from your MCP client.*
+One shot of grooming, three ways to review:
+
+```bash
+make groom                                # run the agents, file proposals
+make review                               # the queue, highest confidence first
+python -m app.review approve 0695fabc     # or reject / rollback / show
+# ...or from Claude/Cursor: "review lorekeeper's pending proposals and apply
+# the obvious ones"
+```
+
+*In progress: drift + staleness agents, LLM-assisted schema bootstrap.*
 
 ## [ Persistence ] — RBAC & posture
 
@@ -210,6 +228,8 @@ app/
   llm/               # provider abstraction: Azure OpenAI + offline stub
   ontology/          # extraction schema, embeddings, resolver (dedup)
   proposals/         # the self-maintenance engine: submit/approve/rollback
+  agents/            # maintenance scanners (dedup, ...) — they only file proposals
+  review.py          # the human side: CLI over the proposal queue
   repositories/      # GraphRepository — THE read choke point
   security/          # principal, JWT identity, visibility, audit
   mcp/server.py      # FastMCP stdio server — the agent-facing tools

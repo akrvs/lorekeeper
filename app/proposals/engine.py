@@ -21,6 +21,7 @@ from typing import Protocol
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.cache import get_cache
 from app.config import settings
 from app.db.models.proposal import (
     APPLIED_STATUSES,
@@ -135,6 +136,7 @@ class ProposalEngine:
         proposal.status = STATUS_ROLLED_BACK
         proposal.reviewed_by = reviewed_by
         self.db.commit()
+        get_cache().bump("graph")  # the applied change was visible — invalidate reads
         logger.info("Rolled back %s proposal %s", proposal.kind, proposal.id)
         return proposal
 
@@ -168,6 +170,7 @@ class ProposalEngine:
             proposal.status = final_status
             proposal.applied_at = func.now()
             self.db.commit()
+            get_cache().bump("graph")  # the graph changed — invalidate cached MCP reads
             logger.info("Applied %s proposal %s (%s)", proposal.kind, proposal.id, final_status)
         except Exception as exc:
             # Undo any partial graph mutation, then persist the failure itself.
