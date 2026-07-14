@@ -26,7 +26,7 @@
 ![difficulty](https://img.shields.io/badge/difficulty-Hard-red)
 ![python](https://img.shields.io/badge/python-3.12-blue)
 ![db](https://img.shields.io/badge/postgres-16%20%2B%20pgvector-blue)
-![tests](https://img.shields.io/badge/tests-60%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-68%20passing-brightgreen)
 ![license](https://img.shields.io/badge/license-Apache--2.0-green)
 
 ```
@@ -36,7 +36,7 @@
 │ stack      : Python · FastAPI · SQLAlchemy · Postgres+pgvector  │
 │ interfaces : MCP (stdio) · REST · CLI                           │
 │ flags      : user [query the graph]  root [graph grooms itself] │
-│ status     : ACTIVE — 7 connectors · 8 MCP tools · 60 tests     │
+│ status     : ACTIVE — 7 connectors · 8 MCP tools · 68 tests     │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -193,15 +193,30 @@ maintenance agents ──▶ proposals (pending) ──▶ human approves ──
   vocabulary the ontology is missing wholesale. Same proposals, same queue,
   same human veto.
 
-One shot of grooming, three ways to review:
+One shot of grooming, four ways to review:
 
 ```bash
 make groom                                # run the agents, file proposals
+make review-tui                           # split-pane TUI: one-key approve/reject
 make review                               # the queue, highest confidence first
 python -m app.review approve 0695fabc     # or reject / rollback / show
 # ...or from Claude/Cursor: "review lorekeeper's pending proposals and apply
 # the obvious ones"
 ```
+
+The TUI (`python -m app.review tui`) is the fastest human loop: the queue on
+top, the selected proposal's payload + evidence (scores, the judge's rationale,
+rollback availability) below, and `a`/`r`/`b` to approve, reject, or roll back
+— each with a y/N confirm. Stdlib curses, zero new dependencies.
+
+<p align="center">
+  <img src="assets/review-tui.gif" alt="the review TUI: approve a judge-confirmed merge, reject the pair the judge called different, then audit the trail" width="900">
+</p>
+
+> Above: the dedup agent filed two merges — the judge confirmed one (*same
+> person seen in two tools*) and doubted the other (*a service and its
+> database*). The human approves the first, rejects the second, then cycles
+> the filter to see the full audit trail.
 
 ## [ Persistence ] — RBAC & posture
 
@@ -252,6 +267,7 @@ app/
   proposals/         # the self-maintenance engine: submit/approve/rollback
   agents/            # maintenance scanners (dedup, ...) — they only file proposals
   review.py          # the human side: CLI over the proposal queue
+  review_tui.py      # ...and the curses TUI (python -m app.review tui)
   repositories/      # GraphRepository — THE read choke point
   security/          # principal, JWT identity, visibility, audit
   mcp/server.py      # FastMCP stdio server — the agent-facing tools

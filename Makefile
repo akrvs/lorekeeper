@@ -1,4 +1,4 @@
-.PHONY: up down logs ps psql rebuild clean mcp ingest sync-github sync-slack demo demo-down groom review
+.PHONY: up down logs ps psql rebuild clean mcp ingest sync-github sync-slack demo demo-down groom review review-tui
 
 DEMO_NET := company-brain-demo-net
 DEMO_DB  := company-brain-demo-db
@@ -35,6 +35,9 @@ groom:         ## Run the maintenance agents (dedup, ...) — files proposals
 
 review:        ## Show the proposal queue; e.g. `make review ARGS="approve 1a2b3c4d"`
 	docker compose run --rm -T api python -m app.review $(or $(ARGS),list)
+
+review-tui:    ## Interactive split-pane review (needs a TTY; one-key approve/reject)
+	docker compose run --rm api python -m app.review tui
 
 rebuild:       ## Force a clean image rebuild
 	docker compose build --no-cache

@@ -1,5 +1,6 @@
 """Review queue CLI — the human side of the proposal loop.
 
+    python -m app.review tui      # interactive split-pane queue (app/review_tui.py)
     python -m app.review list [--status pending|applied|...] [--kind entity_merge]
     python -m app.review show     <id-or-prefix>
     python -m app.review approve  <id-or-prefix> [--by NAME]
@@ -23,7 +24,17 @@ from app.proposals import ProposalEngine, ProposalError
 _STATUSES = ["pending", "applied", "auto_applied", "rejected", "rolled_back", "failed"]
 
 
-def _summary(p: Proposal) -> str:
+def default_reviewer() -> str:
+    """Best-effort identity for the review trail. getpass raises in containers
+    whose uid has no passwd entry — reviewing must still work there."""
+    try:
+        return getpass.getuser()
+    except (KeyError, OSError):
+        return "reviewer"
+
+
+def summarize(p: Proposal) -> str:
+    """One reviewer-facing line per proposal (shared with the TUI)."""
     if p.kind == "entity_merge":
         ev = p.evidence or {}
         loser = ev.get("loser", {}).get("name", p.payload.get("loser_id", "?"))
@@ -63,7 +74,7 @@ def cmd_list(db, status: str | None, kind: str | None) -> None:
     for p in rows:
         print(
             f"{str(p.id)[:8]:<10}{p.kind:<14}{p.confidence:<7.2f}"
-            f"{p.agent:<8}{p.status:<13}{_summary(p)}"
+            f"{p.agent:<8}{p.status:<13}{summarize(p)}"
         )
     print(f"\n{len(rows)} proposal(s).")
 
@@ -75,7 +86,7 @@ def cmd_show(db, prefix: str) -> None:
     print(f"  status     : {p.status}")
     print(f"  confidence : {p.confidence:.3f}")
     print(f"  agent      : {p.agent}")
-    print(f"  summary    : {_summary(p)}")
+    print(f"  summary    : {summarize(p)}")
     print(f"  filed      : {p.created_at:%Y-%m-%d %H:%M}")
     if p.reviewed_by:
         print(f"  reviewed   : by {p.reviewed_by} at {p.decided_at or p.updated_at:%Y-%m-%d %H:%M}")
@@ -103,6 +114,7 @@ def _main() -> int:
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
+    sub.add_parser("tui", help="Interactive split-pane review (approve/reject with one key).")
     p_list = sub.add_parser("list", help="Show the queue (highest confidence first).")
     p_list.add_argument("--status", choices=_STATUSES, default="pending")
     p_list.add_argument("--all", action="store_true", help="Every status, not just pending.")
@@ -116,8 +128,13 @@ def _main() -> int:
     ):
         p_cmd = sub.add_parser(name, help=help_text)
         p_cmd.add_argument("id")
-        p_cmd.add_argument("--by", default=getpass.getuser())
+        p_cmd.add_argument("--by", default=default_reviewer())
     args = parser.parse_args()
+
+    if args.cmd == "tui":
+        from app.review_tui import run_tui  # imports curses; keep the plain CLI free of it
+
+        return run_tui()
 
     with SessionLocal() as db:
         try:
