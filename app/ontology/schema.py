@@ -13,8 +13,10 @@ resolver.
 """
 
 from enum import Enum
+from functools import lru_cache as _lru_cache
+from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, create_model
 
 from app.db.ontology_seed import NODE_TYPES, RELATIONSHIP_TYPES
 
@@ -76,8 +78,49 @@ class ExtractedEdge(BaseModel):
         return {p.key: p.value for p in self.properties}
 
 
+class UnmappedType(BaseModel):
+    """The drift escape hatch: something important in the document does not fit
+    any ontology term. Instead of forcing it into a wrong type (or silently
+    dropping it), the model reports it here — the pipeline turns these into
+    schema proposals a human can approve."""
+
+    kind: Literal["node", "relationship"]
+    name: str = Field(
+        description="Proposed type name: snake_case for nodes, UPPER_SNAKE for relationships."
+    )
+    description: str = Field(description="One sentence: what this type means.")
+    example: str = Field(description="The entity/relation in THIS document that needed it.")
+
+
 class ExtractionResult(BaseModel):
     """The full structured payload returned for a single raw document."""
 
     nodes: list[ExtractedNode] = Field(default_factory=list)
     edges: list[ExtractedEdge] = Field(default_factory=list)
+    unmapped_types: list[UnmappedType] = Field(default_factory=list)
+
+
+# --- Live-registry (dynamic) extraction models ------------------------------
+# The static enums above are frozen at import from the seed lists. Once schema
+# proposals start extending the registry at runtime, extraction must follow the
+# DATABASE's vocabulary — otherwise an approved type could never be extracted
+# and would re-surface as drift forever.
+@_lru_cache(maxsize=8)
+def _build_extraction_model(node_names: tuple[str, ...], rel_names: tuple[str, ...]):
+    node_enum = Enum("NodeTypeEnum", {n: n for n in node_names}, type=str)
+    rel_enum = Enum("RelationshipTypeEnum", {r: r for r in rel_names}, type=str)
+    node_model = create_model("ExtractedNode", __base__=ExtractedNode, node_type=(node_enum, ...))
+    edge_model = create_model("ExtractedEdge", __base__=ExtractedEdge, relationship=(rel_enum, ...))
+    return create_model(
+        "ExtractionResult",
+        __base__=ExtractionResult,
+        nodes=(list[node_model], Field(default_factory=list)),
+        edges=(list[edge_model], Field(default_factory=list)),
+    )
+
+
+def extraction_model_for(node_names: list[str], rel_names: list[str]) -> type[ExtractionResult]:
+    """A strict ExtractionResult whose enums match the given vocabulary.
+    Cached per vocabulary, so a registry INSERT yields a fresh model on the
+    next extraction while unchanged vocabularies reuse the same class."""
+    return _build_extraction_model(tuple(sorted(node_names)), tuple(sorted(rel_names)))

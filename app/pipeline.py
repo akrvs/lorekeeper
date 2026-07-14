@@ -29,6 +29,7 @@ from app.llm.base import LLMProvider
 from app.ontology.embeddings import collect_embed_items, embed_extraction, embed_many
 from app.ontology.extractor import extract_document
 from app.ontology.resolver import Resolver, ResolveStats
+from app.proposals import file_unmapped
 
 logger = logging.getLogger("company_brain.pipeline")
 
@@ -42,7 +43,8 @@ def _build_connector(
 
 
 def process_document(db: Session, provider: LLMProvider, document: RawDocument) -> ResolveStats:
-    extraction = extract_document(provider, document)
+    extraction = extract_document(provider, document, db)
+    file_unmapped(db, document, extraction.unmapped_types)  # drift -> schema proposals
     embeddings = embed_extraction(provider, extraction)
     return Resolver(db).resolve_document(document, extraction, embeddings)
 
@@ -66,8 +68,10 @@ def run_source(
     # then resolve — collapsing N per-document embedding calls into ⌈N/size⌉.
     extractions = []
     embed_items: list = []
+    drift_filed = 0
     for doc in documents:
-        extraction = extract_document(provider, doc)
+        extraction = extract_document(provider, doc, db)
+        drift_filed += len(file_unmapped(db, doc, extraction.unmapped_types))
         extractions.append((doc, extraction))
         embed_items.extend(collect_embed_items(doc.id, extraction))
     vectors = embed_many(provider, embed_items, settings.embedding_batch_size)
@@ -92,6 +96,7 @@ def run_source(
         "target": repo or channel_id or settings.github_repo or settings.slack_channel_id,
         "ingestion_run_id": str(run.id),
         "documents": len(documents),
+        "schema_drift_proposals": drift_filed,
         **totals,
     }
     logger.info("Pipeline report: %s", report)

@@ -41,13 +41,10 @@ class StubProvider:
         return [deterministic_embedding(t, self._dim) for t in texts]
 
     def extract(self, system_prompt: str, user_content: str, schema: type[T]) -> T:
-        # Imported lazily to avoid an llm->ontology import at module load.
-        from app.ontology.schema import (
-            ExtractedEdge,
-            ExtractedNode,
-            NodeTypeEnum,
-            RelationshipTypeEnum,
-        )
+        if "nodes" not in schema.model_fields:
+            # Not an extraction payload (e.g. the bootstrap missing-type report):
+            # the offline stub has no opinion — return the schema's empty default.
+            return schema()
 
         def field(name: str) -> str | None:
             match = re.search(_FIELD.format(name=name), user_content, re.M)
@@ -58,20 +55,22 @@ class StubProvider:
         title = field("title") or external_id or "document"
         body = user_content.split("\n---\n", 1)[-1]
 
-        # The artifact itself -> a sourced document node.
-        nodes = [
-            ExtractedNode(
-                temp_id="d0",
-                node_type=NodeTypeEnum("document"),
-                name=title,
-                summary=(re.sub(r"\s+", " ", body).strip()[:160] or title),
-                source_system=source_system,
-                external_id=external_id,
-                properties=[],
-                confidence=1.0,
-            )
+        # The artifact itself -> a sourced document node. Built as plain dicts
+        # so the payload validates against BOTH the static schema and the
+        # dynamic live-registry models (their enums coerce from strings).
+        nodes: list[dict] = [
+            {
+                "temp_id": "d0",
+                "node_type": "document",
+                "name": title,
+                "summary": (re.sub(r"\s+", " ", body).strip()[:160] or title),
+                "source_system": source_system,
+                "external_id": external_id,
+                "properties": [],
+                "confidence": 1.0,
+            }
         ]
-        edges: list[ExtractedEdge] = []
+        edges: list[dict] = []
 
         # [[wikilinks]] -> derived 'document' concept nodes + REFERENCES edges.
         seen: list[str] = []
@@ -82,24 +81,24 @@ class StubProvider:
         for i, name in enumerate(seen, start=1):
             tid = f"w{i}"
             nodes.append(
-                ExtractedNode(
-                    temp_id=tid,
-                    node_type=NodeTypeEnum("document"),
-                    name=name,
-                    summary=f"Note referenced via wikilink: {name}",
-                    source_system=None,  # derived -> deduped across files by name
-                    external_id=None,
-                    properties=[],
-                    confidence=0.8,
-                )
+                {
+                    "temp_id": tid,
+                    "node_type": "document",
+                    "name": name,
+                    "summary": f"Note referenced via wikilink: {name}",
+                    "source_system": None,  # derived -> deduped across files by name
+                    "external_id": None,
+                    "properties": [],
+                    "confidence": 0.8,
+                }
             )
             edges.append(
-                ExtractedEdge(
-                    source_temp_id="d0",
-                    target_temp_id=tid,
-                    relationship=RelationshipTypeEnum("REFERENCES"),
-                    properties=[],
-                    confidence=0.8,
-                )
+                {
+                    "source_temp_id": "d0",
+                    "target_temp_id": tid,
+                    "relationship": "REFERENCES",
+                    "properties": [],
+                    "confidence": 0.8,
+                }
             )
-        return schema(nodes=nodes, edges=edges)
+        return schema.model_validate({"nodes": nodes, "edges": edges})

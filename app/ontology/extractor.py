@@ -7,11 +7,14 @@ and the legal endpoints for each relationship).
 
 import logging
 
+from sqlalchemy.orm import Session
+
 from app.config import settings
 from app.db.models.source import RawDocument
 from app.db.ontology_seed import NODE_TYPES, RELATIONSHIP_TYPES
 from app.llm.base import LLMProvider
-from app.ontology.schema import ExtractionResult
+from app.ontology.registry import live_registry
+from app.ontology.schema import ExtractionResult, extraction_model_for
 from app.textutil import clip_text
 
 logger = logging.getLogger("company_brain.ontology.extractor")
@@ -21,13 +24,17 @@ def _format_endpoints(allowed: list | None) -> str:
     return "any" if not allowed else ", ".join(allowed)
 
 
-def build_system_prompt() -> str:
-    node_lines = "\n".join(f"  - {nt['name']}: {nt['description']}" for nt in NODE_TYPES)
+def build_system_prompt(
+    node_types: list[dict] | None = None, relationship_types: list[dict] | None = None
+) -> str:
+    node_types = node_types or NODE_TYPES
+    relationship_types = relationship_types or RELATIONSHIP_TYPES
+    node_lines = "\n".join(f"  - {nt['name']}: {nt['description']}" for nt in node_types)
     edge_lines = "\n".join(
         f"  - {rt['name']}: {rt['description']} "
         f"(source: {_format_endpoints(rt.get('allowed_source_types'))} -> "
         f"target: {_format_endpoints(rt.get('allowed_target_types'))})"
-        for rt in RELATIONSHIP_TYPES
+        for rt in relationship_types
     )
     return (
         "You are the extraction engine of Company Brain, an organizational knowledge "
@@ -48,7 +55,12 @@ def build_system_prompt() -> str:
         "4. Keep `name` canonical and stable (e.g. a feature called 'checkout-v2' should "
         "be named identically everywhere) so cross-document dedup works.\n"
         "5. summary is one or two sentences; it is embedded for semantic search.\n"
-        "6. Only assert relationships actually supported by the text. Do not invent."
+        "6. Only assert relationships actually supported by the text. Do not invent.\n"
+        "7. If the document contains an IMPORTANT entity or relationship whose type is "
+        "missing from the ontology above, do NOT force it into a wrong type and do NOT "
+        "drop it silently — report it in unmapped_types (snake_case name for nodes, "
+        "UPPER_SNAKE for relationships, one-line description, and the concrete example "
+        "from this document). Reserve this for recurring concepts, not one-off nouns."
     )
 
 
@@ -71,8 +83,21 @@ def _render_document(doc: RawDocument) -> str:
     return "\n".join(parts)
 
 
-def extract_document(provider: LLMProvider, doc: RawDocument) -> ExtractionResult:
-    result = provider.extract(build_system_prompt(), _render_document(doc), ExtractionResult)
+def extract_document(
+    provider: LLMProvider, doc: RawDocument, db: Session | None = None
+) -> ExtractionResult:
+    # With a session, prompt + enums follow the LIVE registry (so types added
+    # by approved schema proposals become extractable immediately). Without
+    # one, fall back to the seed vocabulary (import-time constants).
+    if db is not None:
+        node_types, rel_types = live_registry(db)
+        prompt = build_system_prompt(node_types, rel_types)
+        model = extraction_model_for(
+            [nt["name"] for nt in node_types], [rt["name"] for rt in rel_types]
+        )
+    else:
+        prompt, model = build_system_prompt(), ExtractionResult
+    result = provider.extract(prompt, _render_document(doc), model)
     logger.info(
         "Extracted %d nodes / %d edges from %s:%s",
         len(result.nodes),
