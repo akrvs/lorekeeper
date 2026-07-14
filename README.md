@@ -168,6 +168,14 @@ maintenance agents ──▶ proposals (pending) ──▶ human approves ──
   compared) and gray-band near-misses below the auto-merge thresholds. Each
   proposal carries the evidence (trigram similarity, cosine distance, mention
   counts) a reviewer needs.
+- **Every new candidate pair is put to the LLM as a merge judge** — similarity
+  scores catch candidates, they can't judge identity (`payments-service` vs
+  `payments-db` score high and are different things). A confident *different*
+  verdict keeps the pair out of your queue entirely; *same* raises the
+  proposal's confidence; the one-line rationale lands in the evidence next to
+  the scores. Already-filed pairs are never re-judged, the offline stub
+  abstains for free, and a judge outage degrades to plain heuristic proposals
+  (`DEDUP_LLM_JUDGE`, on by default).
 - **The staleness agent** flags nodes whose newest evidence went quiet
   (`STALE_AFTER_DAYS`, default 180) — confidence grows with age. Applying
   stamps `stale`/`stale_since` into the node's properties, so every MCP answer

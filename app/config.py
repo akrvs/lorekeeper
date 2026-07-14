@@ -90,6 +90,12 @@ class Settings(BaseSettings):
     dedup_name_threshold: float = 0.45
     dedup_vec_threshold: float = 0.25
     dedup_scan_limit: int = 100  # max candidate pairs per run
+    # LLM second opinion on each NEW candidate pair (same/different/unsure).
+    # Safe default: the stub provider answers "unsure", which changes nothing.
+    dedup_llm_judge: bool = True
+    # A "different" verdict at/above this confidence keeps the pair out of the
+    # queue entirely; below it, the pair is filed with its confidence lowered.
+    dedup_llm_skip_threshold: float = 0.8
     # Staleness agent: flag nodes whose newest evidence is older than this.
     stale_after_days: int = 180
     stale_scan_limit: int = 200
