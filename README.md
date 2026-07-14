@@ -26,7 +26,7 @@
 ![difficulty](https://img.shields.io/badge/difficulty-Hard-red)
 ![python](https://img.shields.io/badge/python-3.12-blue)
 ![db](https://img.shields.io/badge/postgres-16%20%2B%20pgvector-blue)
-![tests](https://img.shields.io/badge/tests-46%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-60%20passing-brightgreen)
 ![license](https://img.shields.io/badge/license-Apache--2.0-green)
 
 ```
@@ -36,7 +36,7 @@
 │ stack      : Python · FastAPI · SQLAlchemy · Postgres+pgvector  │
 │ interfaces : MCP (stdio) · REST · CLI                           │
 │ flags      : user [query the graph]  root [graph grooms itself] │
-│ status     : ACTIVE — 7 connectors · 8 MCP tools · 46 tests     │
+│ status     : ACTIVE — 7 connectors · 8 MCP tools · 60 tests     │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -107,7 +107,7 @@ down with `make demo-down`.
 The full stack:
 
 ```bash
-cp .env.example .env             # LLM_PROVIDER=azure + keys, or =stub for offline
+cp .env.example .env             # LLM_PROVIDER=azure | anthropic | stub (offline)
 make up                          # db + api; schema auto-migrates on startup
 curl localhost:8000/health/db    # graph + ontology counts
 
@@ -168,6 +168,22 @@ maintenance agents ──▶ proposals (pending) ──▶ human approves ──
   compared) and gray-band near-misses below the auto-merge thresholds. Each
   proposal carries the evidence (trigram similarity, cosine distance, mention
   counts) a reviewer needs.
+- **The staleness agent** flags nodes whose newest evidence went quiet
+  (`STALE_AFTER_DAYS`, default 180) — confidence grows with age. Applying
+  stamps `stale`/`stale_since` into the node's properties, so every MCP answer
+  carries the warning; the fact keeps its citations, it just stops pretending
+  to be fresh.
+- **Drift detection** — the extractor has an escape hatch: entities that fit
+  no ontology term are reported as `unmapped_types` instead of being forced
+  into a wrong type or silently dropped. The pipeline files them as
+  `schema_node_type` / `schema_relationship_type` proposals; approving one is
+  an `INSERT` into the registry, and because the extraction prompt AND its
+  structured-output enums are built from the **live registry**, the new term
+  is extractable on the very next document. No restart, no migration.
+- **Bootstrap** (`python -m app.bootstrap`) — right after connecting a new
+  company's tools, sweep a sample of ingested documents and ask the LLM what
+  vocabulary the ontology is missing wholesale. Same proposals, same queue,
+  same human veto.
 
 One shot of grooming, three ways to review:
 
@@ -178,8 +194,6 @@ python -m app.review approve 0695fabc     # or reject / rollback / show
 # ...or from Claude/Cursor: "review lorekeeper's pending proposals and apply
 # the obvious ones"
 ```
-
-*In progress: drift + staleness agents, LLM-assisted schema bootstrap.*
 
 ## [ Persistence ] — RBAC & posture
 
@@ -225,7 +239,7 @@ app/
   config.py          # env-driven settings — nothing else reads os.environ
   pipeline.py        # connector → extract → embed → resolve; CLI entrypoint
   connectors/        # BaseConnector + 7 drivers + retry/backoff HTTP core
-  llm/               # provider abstraction: Azure OpenAI + offline stub
+  llm/               # providers: Azure OpenAI · Anthropic (Claude) · offline stub
   ontology/          # extraction schema, embeddings, resolver (dedup)
   proposals/         # the self-maintenance engine: submit/approve/rollback
   agents/            # maintenance scanners (dedup, ...) — they only file proposals

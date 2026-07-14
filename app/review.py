@@ -29,6 +29,12 @@ def _summary(p: Proposal) -> str:
         loser = ev.get("loser", {}).get("name", p.payload.get("loser_id", "?"))
         winner = ev.get("winner", {}).get("name", p.payload.get("winner_id", "?"))
         return f"merge '{loser}' -> '{winner}'"
+    if p.kind == "schema_node_type":
+        return f"add node type '{p.payload.get('name')}'"
+    if p.kind == "schema_relationship_type":
+        return f"add relationship '{p.payload.get('name')}'"
+    if p.kind == "stale_flag":
+        return f"flag stale: {p.payload.get('reason', p.payload.get('node_id'))}"
     return json.dumps(p.payload)[:60]
 
 

@@ -27,4 +27,8 @@ def get_llm_provider() -> LLMProvider:
         from app.llm.azure import AzureOpenAIProvider
 
         return AzureOpenAIProvider(settings)
+    if provider == "anthropic":
+        from app.llm.anthropic import AnthropicProvider
+
+        return AnthropicProvider(settings)
     raise ValueError(f"Unknown LLM_PROVIDER: {settings.llm_provider!r}")

@@ -369,6 +369,10 @@ def _proposal_line(p) -> str:
         loser = p.evidence.get("loser", {}).get("name", "?")
         winner = p.evidence.get("winner", {}).get("name", "?")
         detail = f"merge '{loser}' -> '{winner}'"
+    elif p.kind in ("schema_node_type", "schema_relationship_type"):
+        detail = f"add '{p.payload.get('name')}' to the ontology: {p.payload.get('description')}"
+    elif p.kind == "stale_flag":
+        detail = p.payload.get("reason", detail)
     return (
         f"- id={p.id}  [{p.kind}]  confidence={p.confidence:.2f}  "
         f"agent={p.agent}  status={p.status}\n    {detail}"

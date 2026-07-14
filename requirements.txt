@@ -17,6 +17,7 @@ alembic==1.14.0                 # reserved for production migrations (Step 2+)
 # Pinned to the 1.x line on purpose: that's where the structured-output helper
 # `client.beta.chat.completions.parse()` lives (added in 1.40; 2.x reorganizes it).
 openai>=1.59,<2
+anthropic>=0.116,<1              # Claude provider (LLM_PROVIDER=anthropic)
 httpx>=0.28,<1
 PyGithub>=2.5,<3
 slack-sdk>=3.33,<4
