@@ -30,8 +30,13 @@ class Settings(BaseSettings):
     # to text-embedding-3-small; 3072 to text-embedding-3-large.
     embedding_dim: int = 1536
 
-    # --- LLM / Azure OpenAI (used from Step 2) ------------------------------
+    # --- LLM providers -------------------------------------------------------
+    # "azure" (default), "anthropic" (Claude extraction; embeddings delegate to
+    # Azure if configured, else deterministic offline vectors), or "stub".
     llm_provider: str = "azure"
+    anthropic_api_key: str | None = None  # SDK also resolves ANTHROPIC_API_KEY itself
+    anthropic_model: str = "claude-opus-4-8"
+    anthropic_max_tokens: int = 16000
     azure_openai_endpoint: str | None = None
     azure_openai_api_key: str | None = None
     azure_openai_api_version: str = "2024-10-21"
@@ -85,6 +90,11 @@ class Settings(BaseSettings):
     dedup_name_threshold: float = 0.45
     dedup_vec_threshold: float = 0.25
     dedup_scan_limit: int = 100  # max candidate pairs per run
+    # Staleness agent: flag nodes whose newest evidence is older than this.
+    stale_after_days: int = 180
+    stale_scan_limit: int = 200
+    # Bootstrap: how many recent documents to sample for missing-type discovery.
+    bootstrap_sample_size: int = 25
 
     # --- Connectors (Track 4) -----------------------------------------------
     local_root: str | None = None
