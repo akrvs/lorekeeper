@@ -66,6 +66,8 @@ class Settings(BaseSettings):
     # --- Security / RBAC (Track 1) ------------------------------------------
     # Default OFF -> Principal.anonymous() is superuser; behavior is unchanged.
     rbac_enabled: bool = False
+    # If set, POST /ingest requires this value in the X-API-Key header.
+    ingest_api_key: str | None = None
     oidc_jwks_url: str | None = None
     oidc_audience: str | None = None
     oidc_issuer: str | None = None

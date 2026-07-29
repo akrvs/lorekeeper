@@ -6,13 +6,15 @@ startup it bootstraps the schema so `docker compose up` yields a ready system.
 """
 
 import logging
+import secrets
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app import __version__
+from app.config import settings
 from app.connectors import ConnectorAuthError, ConnectorError, ConnectorFactory
 from app.db.init_db import init_db
 from app.db.models import Edge, Node, OntologyNodeType, OntologyRelationshipType
@@ -65,6 +67,7 @@ def ingest(
     source: str,
     repo: str | None = None,
     channel_id: str | None = None,
+    x_api_key: str | None = Header(default=None),
     db: Session = Depends(get_db),
 ) -> dict:
     """Run a connector end-to-end (fetch -> extract -> embed -> resolve).
@@ -72,8 +75,12 @@ def ingest(
     Live integration: requires GITHUB_TOKEN / SLACK_BOT_TOKEN and a target
     (`repo` for github, `channel_id` for slack; falls back to GITHUB_REPO /
     SLACK_CHANNEL_ID). With LLM_PROVIDER=azure extraction is real; with =stub it
-    only populates raw_documents.
+    only populates raw_documents. If INGEST_API_KEY is set, the matching
+    X-API-Key header is required.
     """
+    required = settings.ingest_api_key
+    if required and not (x_api_key and secrets.compare_digest(x_api_key, required)):
+        raise HTTPException(401, "Invalid or missing X-API-Key header.")
     if source not in ConnectorFactory.available():
         raise HTTPException(
             404, f"Unknown source {source!r}. Known: {ConnectorFactory.available()}"
