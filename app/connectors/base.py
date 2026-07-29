@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -65,6 +66,10 @@ class RawDoc:
 class BaseConnector(ABC):
     #: e.g. "github" | "slack" | "notion" — must match values in raw_documents.
     source_system: str
+    #: The synced resource (repo, channel id, ...) — scopes the sync cursor.
+    resource_key: str | None = None
+    #: Incremental-sync token computed by fetch(); persisted on the run record.
+    new_cursor: str | None = None
 
     def __init__(self, db: Session):
         self.db = db
@@ -74,11 +79,26 @@ class BaseConnector(ABC):
         """Yield artifacts from the source system."""
         raise NotImplementedError
 
+    def last_cursor(self) -> str | None:
+        """The cursor persisted by the newest completed run for this resource."""
+        return self.db.scalar(
+            select(IngestionRun.cursor)
+            .where(
+                IngestionRun.source_system == self.source_system,
+                IngestionRun.resource_key == self.resource_key,
+                IngestionRun.status == "completed",
+                IngestionRun.cursor.is_not(None),
+            )
+            .order_by(IngestionRun.started_at.desc())
+            .limit(1)
+        )
+
     def run(self) -> tuple[IngestionRun, list[RawDocument]]:
         """Execute one ingestion pass. Returns the run record and upserted docs."""
         run = IngestionRun(
             source_system=self.source_system,
             connector=type(self).__name__,
+            resource_key=self.resource_key,
             status="running",
             started_at=_utcnow(),
         )
@@ -91,6 +111,7 @@ class BaseConnector(ABC):
                 documents.append(self._upsert_document(raw))
             run.status = "completed"
             run.stats = {"documents": len(documents)}
+            run.cursor = self.new_cursor
             run.finished_at = _utcnow()
             self.db.commit()
         except Exception as exc:  # noqa: BLE001 — record failure, then re-raise

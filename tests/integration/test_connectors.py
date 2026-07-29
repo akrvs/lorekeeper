@@ -125,6 +125,77 @@ def test_github_pagination_backoff_and_comments(db):
     assert "first comment" in issue.content and "second comment" in issue.content
 
 
+def test_github_incremental_cursor(db):
+    db.execute(text("TRUNCATE raw_documents, ingestion_runs RESTART IDENTITY CASCADE"))
+    db.commit()
+    seen = {"since": None, "pulls_params": None}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/pulls"):
+            seen["pulls_params"] = dict(request.url.params)
+            return httpx.Response(200, json=[_PR])
+        if path.endswith("/comments"):
+            return httpx.Response(200, json=[])
+        if path.endswith("/issues"):
+            seen["since"] = request.url.params.get("since")
+            return httpx.Response(200, json=[_ISSUE])
+        return httpx.Response(404, json={})
+
+    def connector():
+        return GitHubConnector(db, repo="o/r", token="x", transport=httpx.MockTransport(handler))
+
+    run1, docs1 = connector().run()
+    assert seen["since"] is None
+    assert run1.cursor == "2026-01-03T00:00:00Z"  # newest updated_at (the issue)
+    assert len(docs1) == 2
+
+    run2, docs2 = connector().run()
+    assert seen["since"] == run1.cursor  # issues filtered server-side
+    assert seen["pulls_params"]["sort"] == "updated"
+    # The PR (updated before the cursor) is dropped by the stop predicate.
+    assert [d.source_type for d in docs2] == ["issue"]
+    assert run2.cursor == run1.cursor
+
+
+def test_slack_incremental_cursor(db):
+    db.execute(text("TRUNCATE raw_documents, ingestion_runs RESTART IDENTITY CASCADE"))
+    db.commit()
+    seen = {"oldest": None}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        meta = {"response_metadata": {"next_cursor": ""}}
+        if path.endswith("/users.list"):
+            return httpx.Response(200, json={"ok": True, "members": [], **meta})
+        if path.endswith("/conversations.history"):
+            seen["oldest"] = request.url.params.get("oldest")
+            return httpx.Response(
+                200,
+                json={
+                    "ok": True,
+                    "messages": [
+                        {"type": "message", "user": "U1", "ts": "200.2", "text": "newer"},
+                        {"type": "message", "user": "U2", "ts": "100.1", "text": "older"},
+                    ],
+                    **meta,
+                },
+            )
+        return httpx.Response(200, json={"ok": False, "error": "unknown_method"})
+
+    def connector():
+        return SlackConnector(
+            db, channel_id="C1", token="x", transport=httpx.MockTransport(handler)
+        )
+
+    run1, _ = connector().run()
+    assert seen["oldest"] is None
+    assert run1.cursor == "200.2"
+
+    connector().run()
+    assert seen["oldest"] == "200.2"
+
+
 def test_slack_cursor_pagination_and_user_resolution(db):
     db.execute(text("TRUNCATE raw_documents, ingestion_runs RESTART IDENTITY CASCADE"))
     db.commit()

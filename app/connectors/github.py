@@ -6,6 +6,10 @@ Link-header pagination and the shared retry/backoff layer; the sync `fetch()`
 required by BaseConnector bridges to it via asyncio.run so the rest of the
 pipeline (sync DB + extraction) is untouched.
 
+Syncs are incremental: the newest `updated_at` seen is persisted as the run
+cursor, later runs pass it as `since=` on issues and stop paginating PRs
+(sorted by updated, descending) once they reach it.
+
 Auth: a Personal Access Token (GITHUB_TOKEN). For private repos / higher rate
 limits use a fine-grained PAT with `Contents: read`, `Pull requests: read`,
 `Issues: read`.
@@ -13,7 +17,7 @@ limits use a fine-grained PAT with `Contents: read`, `Pull requests: read`,
 
 import asyncio
 import logging
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import datetime
 
 import httpx
@@ -59,11 +63,14 @@ class GitHubConnector(BaseConnector):
             raise ValueError("GitHubConnector requires repo as 'owner/name'.")
         if not self.token:
             raise ValueError("GitHubConnector requires a token (GITHUB_TOKEN).")
+        self.resource_key = self.repo
         self.max_items = max_items or settings.ingest_max_items
         self._transport = transport
+        self._since: str | None = None
 
     # --- BaseConnector contract (sync bridge to the async implementation) ---
     def fetch(self) -> Iterable[RawDoc]:
+        self._since = self.last_cursor()
         return run_blocking(self._fetch_all())
 
     # --- async implementation ----------------------------------------------
@@ -86,11 +93,27 @@ class GitHubConnector(BaseConnector):
                 self._fetch_issues(client),
             )
         docs = pulls + issues
+        stamps = [d.source_updated_at for d in docs if d.source_updated_at]
+        if stamps:
+            self.new_cursor = max(stamps).strftime("%Y-%m-%dT%H:%M:%SZ")
+        else:
+            self.new_cursor = self._since
         logger.info("github %s: %d PRs, %d issues", self.repo, len(pulls), len(issues))
         return docs
 
-    async def _paginate(self, client: httpx.AsyncClient, path: str, params: dict) -> list[dict]:
-        """Collect list results across pages, following the Link rel=next header."""
+    def _older_than_cursor(self, item: dict) -> bool:
+        ts = item.get("updated_at")
+        return bool(self._since and ts and ts < self._since)
+
+    async def _paginate(
+        self,
+        client: httpx.AsyncClient,
+        path: str,
+        params: dict,
+        stop: Callable[[dict], bool] | None = None,
+    ) -> list[dict]:
+        """Collect list results across pages, following the Link rel=next header.
+        `stop` drops matching items and ends pagination at the first match."""
         results: list[dict] = []
         url: str | None = path
         query: dict | None = {**params, "per_page": 100}
@@ -99,13 +122,24 @@ class GitHubConnector(BaseConnector):
             page = resp.json()
             if not isinstance(page, list):
                 break
-            results.extend(page)
+            if stop is not None:
+                fresh = [item for item in page if not stop(item)]
+                results.extend(fresh)
+                if len(fresh) < len(page):
+                    break
+            else:
+                results.extend(page)
             url = _next_link(resp)  # absolute URL or None
             query = None  # the next URL already carries the params
         return results[: self.max_items]
 
     async def _fetch_pull_requests(self, client: httpx.AsyncClient) -> list[RawDoc]:
-        items = await self._paginate(client, f"/repos/{self.repo}/pulls", {"state": "all"})
+        items = await self._paginate(
+            client,
+            f"/repos/{self.repo}/pulls",
+            {"state": "all", "sort": "updated", "direction": "desc"},
+            stop=self._older_than_cursor,
+        )
         docs: list[RawDoc] = []
         for pr in items:
             state = "merged" if pr.get("merged_at") else pr.get("state", "unknown")
@@ -127,7 +161,10 @@ class GitHubConnector(BaseConnector):
         return docs
 
     async def _fetch_issues(self, client: httpx.AsyncClient) -> list[RawDoc]:
-        items = await self._paginate(client, f"/repos/{self.repo}/issues", {"state": "all"})
+        params = {"state": "all"}
+        if self._since:
+            params["since"] = self._since
+        items = await self._paginate(client, f"/repos/{self.repo}/issues", params)
         # GitHub's issues endpoint also returns PRs — drop them (we ingest PRs separately).
         issues = [i for i in items if "pull_request" not in i]
 

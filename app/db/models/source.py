@@ -63,6 +63,8 @@ class IngestionRun(UUIDPKMixin, TimestampMixin, Base):
 
     source_system: Mapped[str] = mapped_column(Text, nullable=False)
     connector: Mapped[str] = mapped_column(Text, nullable=False)
+    # The synced resource (repo, channel id, ...) — scopes the incremental cursor.
+    resource_key: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(
         Text, nullable=False, default="running"
     )  # running|completed|failed
@@ -71,3 +73,5 @@ class IngestionRun(UUIDPKMixin, TimestampMixin, Base):
     error: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+
+    __table_args__ = (Index("ix_ingestion_runs_source_resource", "source_system", "resource_key"),)

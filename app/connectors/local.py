@@ -48,6 +48,7 @@ class LocalConnector(BaseConnector):
         self.root = Path(root or settings.local_root or ".").expanduser().resolve()
         if not self.root.is_dir():
             raise ValueError(f"LocalConnector root is not a directory: {self.root}")
+        self.resource_key = self.root.name
         self.patterns = patterns
         self.max_items = max_items or settings.ingest_max_items
         self._concurrency = settings.local_scan_concurrency

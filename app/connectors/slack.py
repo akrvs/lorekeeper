@@ -6,6 +6,11 @@ replies, the full thread (`conversations.replies`). Each thread becomes one
 names via a best-effort `users.list` call (gracefully degrades to raw IDs if
 the token lacks the `users:read` scope).
 
+Syncs are incremental: the newest root `ts` seen is persisted as the run cursor
+and passed as `oldest=` on later runs. Only new root messages are picked up —
+fresh replies to a pre-cursor thread need a full resync (clear the cursor) to
+refresh that thread's transcript.
+
 Auth: a Bot User OAuth Token (SLACK_BOT_TOKEN) with scopes:
 `channels:history` (or `groups:history`), `channels:read`, `users:read`.
 """
@@ -55,11 +60,14 @@ class SlackConnector(BaseConnector):
             raise ValueError("SlackConnector requires a channel_id (SLACK_CHANNEL_ID).")
         if not self.token:
             raise ValueError("SlackConnector requires a token (SLACK_BOT_TOKEN).")
+        self.resource_key = self.channel_id
         self.max_items = max_items or settings.ingest_max_items
         self._transport = transport
+        self._oldest: str | None = None
 
     # --- BaseConnector contract (sync bridge to async) ----------------------
     def fetch(self) -> Iterable[RawDoc]:
+        self._oldest = self.last_cursor()
         return run_blocking(self._fetch_all())
 
     # --- async implementation ----------------------------------------------
@@ -73,12 +81,14 @@ class SlackConnector(BaseConnector):
     async def _fetch_all(self) -> list[RawDoc]:
         async with self._client() as client:
             users = await self._load_user_map(client)
+            params = {"channel": self.channel_id, "limit": 200}
+            if self._oldest:
+                params["oldest"] = self._oldest
             history = await self._cursor_paginate(
-                client,
-                "/conversations.history",
-                {"channel": self.channel_id, "limit": 200},
-                "messages",
+                client, "/conversations.history", params, "messages"
             )
+            stamps = [m["ts"] for m in history if m.get("ts")]
+            self.new_cursor = max(stamps, key=float) if stamps else self._oldest
 
             docs: list[RawDoc] = []
             for msg in history:

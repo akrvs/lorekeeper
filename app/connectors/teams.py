@@ -46,6 +46,7 @@ class TeamsConnector(BaseConnector):
             raise ValueError(
                 "TeamsConnector requires TEAMS_TEAM_ID/TENANT_ID/CLIENT_ID/CLIENT_SECRET."
             )
+        self.resource_key = self.team_id
         self.max_items = max_items or settings.ingest_max_items
         self._transport = transport
 

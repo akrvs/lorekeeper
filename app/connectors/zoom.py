@@ -42,6 +42,7 @@ class ZoomConnector(BaseConnector):
         self.client_secret = client_secret or settings.zoom_client_secret
         if not all((self.account_id, self.client_id, self.client_secret)):
             raise ValueError("ZoomConnector requires ZOOM_ACCOUNT_ID/CLIENT_ID/CLIENT_SECRET.")
+        self.resource_key = self.account_id
         self.max_items = max_items or settings.ingest_max_items
         self._transport = transport
 

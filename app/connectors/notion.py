@@ -53,6 +53,7 @@ class NotionConnector(BaseConnector):
             raise ValueError("NotionConnector requires a database_id (NOTION_DATABASE_ID).")
         if not self.token:
             raise ValueError("NotionConnector requires a token (NOTION_TOKEN).")
+        self.resource_key = self.database_id
         self.max_items = max_items or settings.ingest_max_items
         self._transport = transport
 
