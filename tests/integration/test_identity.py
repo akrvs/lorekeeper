@@ -36,3 +36,42 @@ def test_rbac_disabled_is_anonymous_superuser(db):
     # Default settings (RBAC off) -> unrestricted, no token needed.
     principal = IdentityResolver().resolve(db, None)
     assert principal.superuser is True
+
+
+def _jwks_resolver(monkeypatch, public_key):
+    """An IdentityResolver whose JWKS client serves `public_key` (no network)."""
+    monkeypatch.setattr("app.security.identity.settings.oidc_jwks_url", "https://idp/jwks")
+    resolver = IdentityResolver()
+    signing_key = type("SigningKey", (), {"key": public_key})()
+    client = type("JWKSClient", (), {"get_signing_key_from_jwt": lambda self, t: signing_key})()
+    resolver._jwks_client = client
+    return resolver
+
+
+def test_jwks_verifies_a_signed_token(monkeypatch):
+    jwt = pytest.importorskip("jwt")
+    rsa = pytest.importorskip("cryptography.hazmat.primitives.asymmetric.rsa")
+    private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    resolver = _jwks_resolver(monkeypatch, private.public_key())
+
+    token = jwt.encode({"sub": "alice", "groups": ["eng"]}, private, algorithm="RS256")
+    assert resolver._decode(token)["sub"] == "alice"
+
+
+def test_jwks_rejects_a_forged_signature(monkeypatch):
+    jwt = pytest.importorskip("jwt")
+    rsa = pytest.importorskip("cryptography.hazmat.primitives.asymmetric.rsa")
+    attacker = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    trusted = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    resolver = _jwks_resolver(monkeypatch, trusted.public_key())
+
+    forged = jwt.encode({"sub": "alice", "groups": ["admins"]}, attacker, algorithm="RS256")
+    with pytest.raises(PermissionError):
+        resolver._decode(forged)
+
+
+def test_jwks_rejects_a_malformed_token(monkeypatch):
+    pytest.importorskip("jwt")
+    monkeypatch.setattr("app.security.identity.settings.oidc_jwks_url", "https://idp/jwks")
+    with pytest.raises(PermissionError):
+        IdentityResolver()._decode("not-a-jwt")

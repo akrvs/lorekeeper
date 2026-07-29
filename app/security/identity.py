@@ -1,13 +1,14 @@
 """Token -> Principal resolution.
 
-MVP behavior:
+Behavior:
   * RBAC disabled  -> Principal.anonymous() (superuser); fully back-compatible.
   * RBAC enabled   -> decode the JWT claims, read the caller's groups, and map
     them to grants via the `access_grants` table.
 
-The JWT is decoded WITHOUT signature verification here to avoid a hard PyJWT/
-JWKS dependency in the open-source core. Production deployments should subclass
-`IdentityResolver._decode` to verify against `OIDC_JWKS_URL`/`OIDC_AUDIENCE`.
+With `OIDC_JWKS_URL` set the JWT signature is verified against the IdP's JWKS
+(plus audience/issuer when `OIDC_AUDIENCE`/`OIDC_ISSUER` are configured).
+Without it the claims are decoded unverified — acceptable only when the token
+comes from a trusted channel (e.g. injected by your own gateway).
 """
 
 import base64
@@ -53,6 +54,9 @@ def grants_for_groups(db: Session, groups: tuple[str, ...]) -> tuple[SourceGrant
 
 
 class IdentityResolver:
+    def __init__(self) -> None:
+        self._jwks_client = None
+
     def resolve(self, db: Session, token: str | None) -> Principal:
         if not settings.rbac_enabled:
             return Principal.anonymous()
@@ -64,11 +68,37 @@ class IdentityResolver:
         return Principal(subject=subject, groups=groups, grants=grants_for_groups(db, groups))
 
     def _decode(self, token: str) -> dict:
-        """Override in production to verify the signature against JWKS."""
+        if settings.oidc_jwks_url:
+            return self._decode_verified(token)
         try:
             return _b64url_json(token.split(".")[1])
         except (IndexError, ValueError, binascii.Error) as exc:
             raise PermissionError(f"Malformed principal token: {exc}") from exc
+
+    def _decode_verified(self, token: str) -> dict:
+        try:
+            import jwt  # noqa: PLC0415 — optional dependency, imported lazily
+        except ImportError as exc:  # pragma: no cover
+            raise RuntimeError(
+                "OIDC_JWKS_URL requires the 'PyJWT' package (pip install 'PyJWT[crypto]')."
+            ) from exc
+        if self._jwks_client is None:
+            self._jwks_client = jwt.PyJWKClient(settings.oidc_jwks_url)
+        try:
+            key = self._jwks_client.get_signing_key_from_jwt(token).key
+            return jwt.decode(
+                token,
+                key,
+                algorithms=["RS256", "ES256"],
+                audience=settings.oidc_audience,
+                issuer=settings.oidc_issuer,
+                options={
+                    "verify_aud": settings.oidc_audience is not None,
+                    "verify_iss": settings.oidc_issuer is not None,
+                },
+            )
+        except jwt.PyJWTError as exc:
+            raise PermissionError(f"JWT verification failed: {exc}") from exc
 
 
 @lru_cache

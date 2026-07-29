@@ -30,3 +30,7 @@ mcp>=1.2,<2
 # imported lazily, so the default in-memory path never needs it).
 # ---------------------------------------------------------------------------
 redis>=5,<6
+
+# JWKS signature verification for RBAC JWTs (used only when OIDC_JWKS_URL is
+# set; imported lazily).
+PyJWT[crypto]>=2.10,<3
