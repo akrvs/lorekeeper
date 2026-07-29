@@ -26,7 +26,7 @@
 ![difficulty](https://img.shields.io/badge/difficulty-Hard-red)
 ![python](https://img.shields.io/badge/python-3.12-blue)
 ![db](https://img.shields.io/badge/postgres-16%20%2B%20pgvector-blue)
-![tests](https://img.shields.io/badge/tests-68%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-78%20passing-brightgreen)
 ![license](https://img.shields.io/badge/license-Apache--2.0-green)
 
 ```
@@ -36,7 +36,7 @@
 │ stack      : Python · FastAPI · SQLAlchemy · Postgres+pgvector  │
 │ interfaces : MCP (stdio) · REST · CLI                           │
 │ flags      : user [query the graph]  root [graph grooms itself] │
-│ status     : ACTIVE — 7 connectors · 8 MCP tools · 68 tests     │
+│ status     : ACTIVE — 7 connectors · 8 MCP tools · 78 tests     │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -115,6 +115,10 @@ make sync-github REPO=owner/name         # live ingest
 make sync-slack  CHANNEL=C0123456789
 make mcp                                  # the MCP server an agent launches
 ```
+
+Re-syncs are cheap: GitHub/Slack resume from a per-resource cursor, and
+documents whose content is unchanged skip extraction entirely (no repeat LLM
+spend) — `--force` re-extracts, e.g. after extending the ontology.
 
 Register in Claude Desktop / Cursor: see [`docs/MCP_SETUP.md`](docs/MCP_SETUP.md).
 Production: `docker compose -f docker-compose.prod.yml up --build -d` (DB port
@@ -224,8 +228,11 @@ Graph-level RBAC is implemented and **defaults OFF**. Flip `RBAC_ENABLED=true`
 and every MCP tool row-filters by the caller's grants: OIDC/JWT → principal →
 groups → `access_grants` → visible `(source_system, resource_key)` set —
 enforced in one place (`GraphRepository`), audited per call (`audit_log`).
-Secrets live in the environment only; prod DB has no exposed port; the image
-runs non-root; the MCP server logs strictly to stderr.
+With `OIDC_JWKS_URL` set, JWTs are signature-verified against your IdP's JWKS
+(audience/issuer checked when configured). The REST ingest endpoint can be
+key-gated (`INGEST_API_KEY`). Secrets live in the environment only; prod DB has
+no exposed port; the image runs non-root; the MCP server logs strictly to
+stderr.
 
 ## [ Loadout ] — write a connector
 
