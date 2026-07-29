@@ -159,6 +159,8 @@ class BaseConnector(ABC):
                 "source_updated_at": stmt.excluded.source_updated_at,
                 "ingested_at": stmt.excluded.ingested_at,
             },
-        ).returning(RawDocument.id)
-        doc_id = self.db.execute(stmt).scalar_one()
-        return self.db.get(RawDocument, doc_id)
+        ).returning(RawDocument)
+        # populate_existing: the upsert bypasses the ORM, so an instance already
+        # in the identity map (same-session re-sync) must be refreshed from the
+        # returned row rather than served with stale attributes.
+        return self.db.execute(stmt, execution_options={"populate_existing": True}).scalar_one()
