@@ -54,7 +54,9 @@ def main() -> int:
     for s, t in edges:
         out_by_src.setdefault(s, []).append(t)
 
-    resolved_ok = "✓ all [[wikilinks]] resolved to files" if concept_count == 0 else "⚠ unresolved"
+    resolved_ok = (
+        "OK: all [[wikilinks]] resolved to files" if concept_count == 0 else "WARN: unresolved"
+    )
 
     lines = [
         "",
