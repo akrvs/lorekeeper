@@ -59,8 +59,7 @@ class TeamsConnector(BaseConnector):
                 client,
                 "POST",
                 url,
-                json=None,
-                params={
+                data={
                     "client_id": self.client_id,
                     "client_secret": self.client_secret,
                     "scope": "https://graph.microsoft.com/.default",

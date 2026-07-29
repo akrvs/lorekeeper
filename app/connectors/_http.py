@@ -88,13 +88,14 @@ async def request_with_retries(
     *,
     params: dict | None = None,
     json: dict | None = None,
+    data: dict | None = None,
 ) -> httpx.Response:
     max_retries = settings.http_max_retries
     last_exc: Exception | None = None
 
     for attempt in range(max_retries + 1):
         try:
-            resp = await client.request(method, url, params=params, json=json)
+            resp = await client.request(method, url, params=params, json=json, data=data)
         except (httpx.TimeoutException, httpx.TransportError) as exc:
             last_exc = exc
             if attempt >= max_retries:
