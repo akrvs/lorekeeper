@@ -34,8 +34,10 @@ class RawDocument(UUIDPKMixin, TimestampMixin, Base):
     content: Mapped[str | None] = mapped_column(Text)  # extracted plain text
     raw_payload: Mapped[dict | None] = mapped_column(JSONB)  # full original API object
 
-    # sha256 of `content`; lets the pipeline skip re-extraction on unchanged docs.
+    # sha256 of `content`; when it matches extracted_hash (stamped after the
+    # last successful extraction) the pipeline skips re-extracting this doc.
     content_hash: Mapped[str | None] = mapped_column(Text)
+    extracted_hash: Mapped[str | None] = mapped_column(Text)
 
     source_created_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     source_updated_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))

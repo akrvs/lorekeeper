@@ -67,6 +67,7 @@ def ingest(
     source: str,
     repo: str | None = None,
     channel_id: str | None = None,
+    force: bool = False,
     x_api_key: str | None = Header(default=None),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -86,7 +87,7 @@ def ingest(
             404, f"Unknown source {source!r}. Known: {ConnectorFactory.available()}"
         )
     try:
-        return run_source(db, source, repo=repo, channel_id=channel_id)
+        return run_source(db, source, repo=repo, channel_id=channel_id, force=force)
     except ValueError as exc:  # misconfiguration (missing repo/token/channel)
         raise HTTPException(400, str(exc)) from exc
     except ConnectorAuthError as exc:

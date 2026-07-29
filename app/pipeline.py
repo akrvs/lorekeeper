@@ -6,7 +6,10 @@
     resolver.resolve_document()    -> nodes / edges / mentions
 
 End-to-end idempotent: connectors upsert on natural keys, the resolver
-upserts/dedups, so re-running a source is safe.
+upserts/dedups, so re-running a source is safe. Documents whose content hash is
+unchanged since their last successful extraction are skipped entirely (no LLM
+spend); pass --force / force=True to re-extract, e.g. after extending the
+ontology.
 
 CLI (turnkey live sync):
     python -m app.pipeline --source github --repo owner/name
@@ -46,6 +49,7 @@ def process_document(db: Session, provider: LLMProvider, document: RawDocument) 
     extraction = extract_document(provider, document, db)
     file_unmapped(db, document, extraction.unmapped_types)  # drift -> schema proposals
     embeddings = embed_extraction(provider, extraction)
+    document.extracted_hash = document.content_hash
     return Resolver(db).resolve_document(document, extraction, embeddings)
 
 
@@ -57,6 +61,7 @@ def run_source(
     channel_id: str | None = None,
     limit: int | None = None,
     provider: LLMProvider | None = None,
+    force: bool = False,
 ) -> dict:
     """Ingest a source end-to-end and return an aggregate report."""
     provider = provider or get_llm_provider()
@@ -69,7 +74,11 @@ def run_source(
     extractions = []
     embed_items: list = []
     drift_filed = 0
+    unchanged = 0
     for doc in documents:
+        if not force and doc.content_hash is not None and doc.content_hash == doc.extracted_hash:
+            unchanged += 1
+            continue
         extraction = extract_document(provider, doc, db)
         drift_filed += len(file_unmapped(db, doc, extraction.unmapped_types))
         extractions.append((doc, extraction))
@@ -80,6 +89,7 @@ def run_source(
     resolver = Resolver(db)
     for doc, extraction in extractions:
         embeddings = {n.temp_id: vectors[(doc.id, n.temp_id)] for n in extraction.nodes}
+        doc.extracted_hash = doc.content_hash
         stats = resolver.resolve_document(doc, extraction, embeddings)
         for key in totals:
             totals[key] += getattr(stats, key)
@@ -97,6 +107,7 @@ def run_source(
         "target": repo or channel_id or settings.github_repo or settings.slack_channel_id,
         "ingestion_run_id": str(run.id),
         "documents": len(documents),
+        "documents_unchanged": unchanged,
         "schema_drift_proposals": drift_filed,
         **totals,
     }
@@ -118,6 +129,11 @@ def _main() -> int:
     parser.add_argument("--repo", help="GitHub repository as 'owner/name'.")
     parser.add_argument("--channel", dest="channel_id", help="Slack channel id, e.g. C0123456789.")
     parser.add_argument("--limit", type=int, default=None, help="Max items to pull this run.")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-extract documents even when their content is unchanged.",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO)
@@ -125,7 +141,12 @@ def _main() -> int:
     try:
         with SessionLocal() as db:
             report = run_source(
-                db, args.source, repo=args.repo, channel_id=args.channel_id, limit=args.limit
+                db,
+                args.source,
+                repo=args.repo,
+                channel_id=args.channel_id,
+                limit=args.limit,
+                force=args.force,
             )
     except ValueError as exc:  # misconfiguration: missing token/repo/channel
         print(f"error: {exc}", file=sys.stderr)

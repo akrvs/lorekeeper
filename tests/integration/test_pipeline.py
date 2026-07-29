@@ -1,9 +1,12 @@
 """Full pipeline: real connectors (MockTransport) → dedup → provenance → traversal."""
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import aliased
 
+from app.config import settings
 from app.db.models import Edge, Node, NodeMention, RawDocument
+from app.llm.stub import StubProvider
+from app.pipeline import run_source
 from tests.fixtures import populate
 
 
@@ -23,6 +26,46 @@ def test_ingest_dedup_and_provenance(db, provider):
     )
     assert mentions == 2
     assert features[0].embedding is not None
+
+
+class _CountingStub(StubProvider):
+    def __init__(self):
+        super().__init__()
+        self.extract_calls = 0
+
+    def extract(self, system_prompt, user_content, schema):
+        self.extract_calls += 1
+        return super().extract(system_prompt, user_content, schema)
+
+
+def test_unchanged_documents_skip_extraction(db, tmp_path, monkeypatch):
+    db.execute(
+        text(
+            "TRUNCATE node_mentions, edges, nodes, raw_documents, ingestion_runs RESTART IDENTITY CASCADE"
+        )
+    )
+    db.commit()
+    (tmp_path / "a.md").write_text("alpha references [[b]]")
+    (tmp_path / "b.md").write_text("beta")
+    monkeypatch.setattr(settings, "local_root", str(tmp_path))
+    counting = _CountingStub()
+
+    first = run_source(db, "local", provider=counting)
+    assert first["documents"] == 2 and first["documents_unchanged"] == 0
+    assert counting.extract_calls == 2
+
+    second = run_source(db, "local", provider=counting)
+    assert second["documents_unchanged"] == 2
+    assert counting.extract_calls == 2
+
+    (tmp_path / "a.md").write_text("alpha CHANGED, still references [[b]]")
+    third = run_source(db, "local", provider=counting)
+    assert third["documents_unchanged"] == 1
+    assert counting.extract_calls == 3
+
+    forced = run_source(db, "local", provider=counting, force=True)
+    assert forced["documents_unchanged"] == 0
+    assert counting.extract_calls == 5
 
 
 def test_headline_traversal(db, provider):
