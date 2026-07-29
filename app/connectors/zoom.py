@@ -5,6 +5,7 @@ TRANSCRIPT file (WEBVTT), parsed by the shared transcript engine into speaker
 turns. Wire-up point: a Server-to-Server OAuth app with `cloud_recording:read`.
 """
 
+import base64
 import logging
 from collections.abc import Iterable
 
@@ -48,15 +49,15 @@ class ZoomConnector(BaseConnector):
         return run_blocking(self._fetch_all())
 
     async def _access_token(self) -> str:
-        auth = httpx.BasicAuth(self.client_id, self.client_secret)
-        async with build_async_client("", {}, transport=self._transport) as client:
+        basic = base64.b64encode(f"{self.client_id}:{self.client_secret}".encode()).decode()
+        headers = {"Authorization": f"Basic {basic}"}
+        async with build_async_client("", headers, transport=self._transport) as client:
             resp = await request_with_retries(
                 client,
                 "POST",
                 "https://zoom.us/oauth/token",
                 params={"grant_type": "account_credentials", "account_id": self.account_id},
             )
-            _ = auth  # BasicAuth applied by the caller in production wiring
             return resp.json()["access_token"]
 
     async def _fetch_all(self) -> list[RawDoc]:
