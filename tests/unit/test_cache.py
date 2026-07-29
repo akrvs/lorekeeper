@@ -17,6 +17,17 @@ def test_ttl_expiry(monkeypatch):
     assert cache.get("k") is None
 
 
+def test_expired_entries_purged_on_set(monkeypatch):
+    cache = InMemoryTTLCache()
+    monkeypatch.setattr(InMemoryTTLCache, "_PURGE_AT", 2)
+    cache.set("a", "v", ttl=10)
+    cache.set("b", "v", ttl=10)
+    real_monotonic = time.monotonic
+    monkeypatch.setattr("app.cache.memory.time.monotonic", lambda: real_monotonic() + 100)
+    cache.set("c", "v", ttl=10)
+    assert set(cache._store) == {"c"}
+
+
 def test_namespace_versioning():
     cache = InMemoryTTLCache()
     assert cache.version("graph") == 0

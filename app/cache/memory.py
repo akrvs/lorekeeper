@@ -5,6 +5,8 @@ import time
 
 
 class InMemoryTTLCache:
+    _PURGE_AT = 1024
+
     def __init__(self) -> None:
         self._store: dict[str, tuple[float, str]] = {}
         self._versions: dict[str, int] = {}
@@ -23,7 +25,10 @@ class InMemoryTTLCache:
 
     def set(self, key: str, value: str, ttl: int) -> None:
         with self._lock:
-            self._store[key] = (time.monotonic() + ttl, value)
+            now = time.monotonic()
+            if len(self._store) >= self._PURGE_AT:
+                self._store = {k: v for k, v in self._store.items() if v[0] >= now}
+            self._store[key] = (now + ttl, value)
 
     def version(self, namespace: str) -> int:
         with self._lock:
