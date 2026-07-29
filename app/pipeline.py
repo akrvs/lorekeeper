@@ -77,9 +77,10 @@ def run_source(
     vectors = embed_many(provider, embed_items, settings.embedding_batch_size)
 
     totals = {"nodes_created": 0, "nodes_updated": 0, "nodes_merged": 0, "edges_upserted": 0}
+    resolver = Resolver(db)
     for doc, extraction in extractions:
         embeddings = {n.temp_id: vectors[(doc.id, n.temp_id)] for n in extraction.nodes}
-        stats = Resolver(db).resolve_document(doc, extraction, embeddings)
+        stats = resolver.resolve_document(doc, extraction, embeddings)
         for key in totals:
             totals[key] += getattr(stats, key)
 

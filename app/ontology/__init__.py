@@ -9,7 +9,7 @@ Modules:
 
 from app.ontology.embeddings import embed_extraction
 from app.ontology.extractor import extract_document
-from app.ontology.resolver import Resolver, ResolveStats, resolve
+from app.ontology.resolver import Resolver, ResolveStats
 from app.ontology.schema import (
     ExtractedEdge,
     ExtractedNode,
@@ -23,7 +23,6 @@ __all__ = [
     "extract_document",
     "Resolver",
     "ResolveStats",
-    "resolve",
     "ExtractedNode",
     "ExtractedEdge",
     "ExtractionResult",

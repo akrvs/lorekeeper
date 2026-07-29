@@ -270,13 +270,3 @@ class Resolver:
         )
         self.db.execute(stmt)
         return True
-
-
-def resolve(
-    db: Session,
-    document: RawDocument,
-    extraction: ExtractionResult,
-    embeddings: dict[str, list[float]],
-) -> ResolveStats:
-    """Module-level convenience wrapper."""
-    return Resolver(db).resolve_document(document, extraction, embeddings)

@@ -23,11 +23,15 @@ import logging
 import sys
 import uuid
 
+from sqlalchemy import select
+
 from app.cache import get_cache, make_key
 from app.config import settings
 from app.db.init_db import wait_for_db
+from app.db.models.proposal import Proposal
 from app.db.session import SessionLocal, engine
 from app.llm import get_llm_provider
+from app.proposals import ProposalEngine, ProposalError
 from app.repositories import GraphRepository
 from app.security import AuditLogger, get_identity_resolver
 
@@ -327,9 +331,7 @@ def traverse_graph_path(
         if start is None:
             return f"No node found with id {start_node_id} (or not authorized)."
         rows = repo.traverse(start, target_node_type, max_depth, limit)
-        AuditLogger(
-            db,
-        ).record(
+        AuditLogger(db).record(
             principal,
             "traverse_graph_path",
             {"start": start_node_id, "target": target_node_type},
@@ -395,10 +397,6 @@ def review_proposals(
         limit: Max proposals to list (default 20).
         principal_token: Optional identity token (RBAC: superuser only).
     """
-    from sqlalchemy import select
-
-    from app.db.models.proposal import Proposal
-
     limit = max(1, min(int(limit), 100))
     with SessionLocal() as db:
         try:
@@ -417,8 +415,6 @@ def review_proposals(
 
 
 def _decide_proposal(action: str, proposal_id: str, principal_token: str | None) -> str:
-    from app.proposals import ProposalEngine, ProposalError
-
     pid = _parse_uuid(proposal_id)
     if pid is None:
         return f"ERROR: '{proposal_id}' is not a valid UUID."

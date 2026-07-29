@@ -74,7 +74,6 @@ class Settings(BaseSettings):
     embedding_batch_size: int = 256
     traverse_statement_timeout_ms: int = 2000
     traverse_max_depth: int = 4
-    traverse_max_results: int = 50
     cache_backend: str = "memory"  # "memory" | "redis"
     cache_ttl_seconds: int = 60
     redis_url: str = "redis://redis:6379/0"
