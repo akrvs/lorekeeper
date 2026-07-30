@@ -6,6 +6,7 @@ from app.db.models import Node
 from app.db.session import SessionLocal
 from app.mcp.server import (
     get_entity_timeline,
+    get_graph_stats,
     get_node_details,
     get_node_neighbors,
     semantic_search,
@@ -56,3 +57,11 @@ def test_entity_timeline_lists_dated_events(committed_graph):
 
 def test_entity_timeline_rejects_bad_uuid(committed_graph):
     assert "not a valid UUID" in get_entity_timeline("nope")
+
+
+def test_graph_stats_reports_counts_and_syncs(committed_graph):
+    res = get_graph_stats()
+    assert "GRAPH STATS" in res
+    assert "NODES BY TYPE:" in res and "feature:" in res
+    assert "EDGES BY RELATIONSHIP:" in res
+    assert "LAST COMPLETED SYNC PER SOURCE:" in res and "github:" in res

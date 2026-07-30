@@ -23,12 +23,13 @@ import logging
 import sys
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.cache import get_cache, make_key
 from app.config import settings
 from app.db.init_db import wait_for_db
 from app.db.models.proposal import Proposal
+from app.db.models.source import IngestionRun
 from app.db.session import SessionLocal, engine
 from app.llm import get_llm_provider
 from app.proposals import ProposalEngine, ProposalError
@@ -395,6 +396,49 @@ def traverse_graph_path(
         out.append(f"- {tname}  ({ttype})  id={tid}  [{depth} hop(s)]")
         out.append("    " + _render_path(name_path, rel_path))
     return "\n".join(out)
+
+
+@mcp.tool()
+def get_graph_stats(principal_token: str | None = None) -> str:
+    """Health snapshot of the knowledge graph.
+
+    Reports node counts by type, edge counts by relationship, stale-flagged
+    nodes, the proposal queue by status, and the last completed sync per source.
+
+    Args:
+        principal_token: Optional identity token to scope results (RBAC).
+    """
+    with SessionLocal() as db:
+        try:
+            principal = _principal(db, principal_token)
+        except PermissionError as exc:
+            return f"ERROR: authorization failed ({exc})."
+        node_counts, edge_counts, stale = GraphRepository(db, principal).stats()
+        proposal_counts = db.execute(
+            select(Proposal.status, func.count()).group_by(Proposal.status)
+        ).all()
+        last_runs = db.execute(
+            select(IngestionRun.source_system, func.max(IngestionRun.finished_at))
+            .where(IngestionRun.status == "completed")
+            .group_by(IngestionRun.source_system)
+            .order_by(IngestionRun.source_system)
+        ).all()
+        AuditLogger(db).record(principal, "get_graph_stats", {}, [])
+
+    total_nodes = sum(c for _, c in node_counts)
+    total_edges = sum(c for _, c in edge_counts)
+    lines = [f"GRAPH STATS — {total_nodes} nodes, {total_edges} edges, {stale} stale-flagged", ""]
+    lines.append("NODES BY TYPE:")
+    lines += [f"  {t}: {c}" for t, c in node_counts] or ["  (empty)"]
+    lines.append("EDGES BY RELATIONSHIP:")
+    lines += [f"  {r}: {c}" for r, c in edge_counts] or ["  (empty)"]
+    lines.append("PROPOSALS BY STATUS:")
+    lines += [f"  {s}: {c}" for s, c in proposal_counts] or ["  (none)"]
+    lines.append("LAST COMPLETED SYNC PER SOURCE:")
+    lines += [f"  {src}: {ts.isoformat() if ts else '(unknown)'}" for src, ts in last_runs] or [
+        "  (no completed runs)"
+    ]
+    return "\n".join(lines)
 
 
 # --------------------------------------------------------------------------- #

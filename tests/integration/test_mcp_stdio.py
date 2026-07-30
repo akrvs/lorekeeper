@@ -13,6 +13,7 @@ from app.db.session import SessionLocal
 _EXPECTED_TOOLS = [
     "approve_proposal",
     "get_entity_timeline",
+    "get_graph_stats",
     "get_node_details",
     "get_node_neighbors",
     "reject_proposal",

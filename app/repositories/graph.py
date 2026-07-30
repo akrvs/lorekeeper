@@ -80,6 +80,32 @@ class GraphRepository:
             stmt = stmt.where(clause)
         return self.db.execute(stmt.order_by(RawDocument.source_system)).all()
 
+    def stats(self):
+        node_stmt = self._restrict(
+            select(Node.node_type, func.count()).where(Node.canonical_node_id.is_(None))
+        )
+        node_counts = self.db.execute(
+            node_stmt.group_by(Node.node_type).order_by(func.count().desc())
+        ).all()
+        edge_stmt = select(Edge.relationship_type, func.count())
+        if self._scope is not None:
+            edge_stmt = edge_stmt.where(
+                Edge.source_id.in_(self._scope), Edge.target_id.in_(self._scope)
+            )
+        edge_counts = self.db.execute(
+            edge_stmt.group_by(Edge.relationship_type).order_by(func.count().desc())
+        ).all()
+        stale_stmt = self._restrict(
+            select(func.count())
+            .select_from(Node)
+            .where(
+                Node.canonical_node_id.is_(None),
+                func.coalesce(Node.properties["stale"].astext, "false") == "true",
+            )
+        )
+        stale = self.db.scalar(stale_stmt)
+        return node_counts, edge_counts, stale
+
     def node_timeline(self, node_id: uuid.UUID, limit: int):
         clause = _doc_clause(self.principal)
         ts = func.coalesce(
