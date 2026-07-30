@@ -441,6 +441,84 @@ def get_graph_stats(principal_token: str | None = None) -> str:
     return "\n".join(lines)
 
 
+def _mermaid_label(name: str, node_type: str) -> str:
+    clean = name.replace('"', "'").replace("[", "(").replace("]", ")")
+    return f'"{clean} ({node_type})"'
+
+
+@mcp.tool()
+def export_subgraph(
+    node_id: str, depth: int = 1, max_edges: int = 50, principal_token: str | None = None
+) -> str:
+    """Export an entity's neighborhood as a Mermaid diagram for human viewing.
+
+    Returns 'graph LR' Mermaid source. Paste it into any Mermaid renderer
+    (GitHub markdown, mermaid.live, Notion) to see the subgraph.
+
+    Args:
+        node_id: UUID of the node at the center of the subgraph.
+        depth: How many hops out to expand (1-3, default 1).
+        max_edges: Cap on edges in the diagram (1-200, default 50).
+        principal_token: Optional identity token to scope results (RBAC).
+    """
+    nid = _parse_uuid(node_id)
+    if nid is None:
+        return f"ERROR: '{node_id}' is not a valid UUID."
+    depth = max(1, min(int(depth), 3))
+    max_edges = max(1, min(int(max_edges), 200))
+
+    with SessionLocal() as db:
+        try:
+            principal = _principal(db, principal_token)
+        except PermissionError as exc:
+            return f"ERROR: authorization failed ({exc})."
+        repo = GraphRepository(db, principal)
+        start = repo.get_node(nid)
+        if start is None:
+            return f"No node found with id {node_id} (or not authorized)."
+
+        labels: dict[uuid.UUID, str] = {start.id: _mermaid_label(start.name, start.node_type)}
+        edges: list[tuple[uuid.UUID, str, uuid.UUID]] = []
+        seen: set[tuple[uuid.UUID, str, uuid.UUID]] = set()
+        frontier = [start.id]
+        for _ in range(depth):
+            next_frontier: list[uuid.UUID] = []
+            for current in frontier:
+                if len(edges) >= max_edges:
+                    break
+                neighbors = repo.neighbors(current, "both", max_edges)
+                for rel, _conf, _weight, tid, tname, ttype in neighbors["outgoing"]:
+                    key = (current, rel, tid)
+                    if key in seen or len(edges) >= max_edges:
+                        continue
+                    seen.add(key)
+                    edges.append(key)
+                    if tid not in labels:
+                        labels[tid] = _mermaid_label(tname, ttype)
+                        next_frontier.append(tid)
+                for rel, _conf, _weight, sid, sname, stype in neighbors["incoming"]:
+                    key = (sid, rel, current)
+                    if key in seen or len(edges) >= max_edges:
+                        continue
+                    seen.add(key)
+                    edges.append(key)
+                    if sid not in labels:
+                        labels[sid] = _mermaid_label(sname, stype)
+                        next_frontier.append(sid)
+            frontier = next_frontier
+        AuditLogger(db).record(
+            principal, "export_subgraph", {"node_id": node_id, "depth": depth}, list(labels)
+        )
+
+    if not edges:
+        return f"{_node_line(start.name, start.node_type, start.id)} has no visible edges."
+    short = {node: f"n{i}" for i, node in enumerate(labels)}
+    lines = ["graph LR"]
+    lines += [f"  {short[node]}[{label}]" for node, label in labels.items()]
+    lines += [f"  {short[src]} -->|{rel}| {short[tgt]}" for src, rel, tgt in edges]
+    return "\n".join(lines)
+
+
 # --------------------------------------------------------------------------- #
 # Self-maintenance: the proposal review queue
 # --------------------------------------------------------------------------- #

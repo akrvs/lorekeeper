@@ -5,6 +5,7 @@ from sqlalchemy import select
 from app.db.models import Node
 from app.db.session import SessionLocal
 from app.mcp.server import (
+    export_subgraph,
     get_entity_timeline,
     get_graph_stats,
     get_node_details,
@@ -57,6 +58,18 @@ def test_entity_timeline_lists_dated_events(committed_graph):
 
 def test_entity_timeline_rejects_bad_uuid(committed_graph):
     assert "not a valid UUID" in get_entity_timeline("nope")
+
+
+def test_export_subgraph_returns_mermaid(committed_graph):
+    feature, _ = _nodes()
+    res = export_subgraph(str(feature.id), depth=2)
+    assert res.startswith("graph LR")
+    assert "-->|IMPLEMENTS|" in res
+    assert "(feature)" in res and "(repository)" in res
+
+
+def test_export_subgraph_rejects_bad_uuid(committed_graph):
+    assert "not a valid UUID" in export_subgraph("nah")
 
 
 def test_graph_stats_reports_counts_and_syncs(committed_graph):
