@@ -105,6 +105,8 @@ class Settings(BaseSettings):
     # Staleness agent: flag nodes whose newest evidence is older than this.
     stale_after_days: int = 180
     stale_scan_limit: int = 200
+    hygiene_scan_limit: int = 100
+    hygiene_edge_confidence: float = 0.3
     # Bootstrap: how many recent documents to sample for missing-type discovery.
     bootstrap_sample_size: int = 25
 
