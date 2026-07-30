@@ -17,6 +17,7 @@ from app.connectors.factory import ConnectorFactory
 # Import drivers for their registration side effects.
 from app.connectors.github import GitHubConnector
 from app.connectors.gmeet import GoogleMeetConnector
+from app.connectors.jira import JiraConnector
 from app.connectors.local import LocalConnector
 from app.connectors.notion import NotionConnector
 from app.connectors.slack import SlackConnector
@@ -29,6 +30,7 @@ __all__ = [
     "ConnectorFactory",
     "GitHubConnector",
     "SlackConnector",
+    "JiraConnector",
     "NotionConnector",
     "LocalConnector",
     "TeamsConnector",

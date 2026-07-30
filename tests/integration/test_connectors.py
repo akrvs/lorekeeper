@@ -3,7 +3,7 @@
 import httpx
 from sqlalchemy import select, text
 
-from app.connectors import GitHubConnector, SlackConnector
+from app.connectors import GitHubConnector, JiraConnector, SlackConnector
 from app.db.models import RawDocument
 
 _gh_calls = {"pulls": 0}
@@ -207,3 +207,76 @@ def test_slack_cursor_pagination_and_user_resolution(db):
     assert len(threads) == 2  # two pages of history
     threaded = db.scalar(select(RawDocument).where(RawDocument.external_id == "100.1"))
     assert "alice:" in threaded.content and "bob:" in threaded.content  # ids resolved
+
+
+_JIRA_ISSUE = {
+    "key": "OPS-1",
+    "fields": {
+        "summary": "Checkout deploy failure",
+        "description": "Pods crash-loop after the checkout-v2 rollout.",
+        "status": {"name": "In Progress"},
+        "creator": {"displayName": "Alice"},
+        "created": "2026-05-20T14:00:00.000+0000",
+        "updated": "2026-05-20T15:00:00.000+0000",
+        "comment": {
+            "comments": [
+                {"author": {"displayName": "Bob"}, "body": "Rolled back to v1."},
+            ]
+        },
+    },
+}
+_JIRA_ISSUE_2 = {
+    "key": "OPS-2",
+    "fields": {
+        "summary": "Follow-up hardening",
+        "description": None,
+        "status": {"name": "To Do"},
+        "creator": {"displayName": "Bob"},
+        "created": "2026-05-21T09:00:00.000+0000",
+        "updated": "2026-05-21T10:30:00.000+0000",
+        "comment": {"comments": []},
+    },
+}
+
+
+def test_jira_pagination_comments_and_cursor(db):
+    db.execute(text("TRUNCATE raw_documents, ingestion_runs RESTART IDENTITY CASCADE"))
+    db.commit()
+    seen = {"jql": []}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/rest/api/2/search"
+        seen["jql"].append(request.url.params.get("jql"))
+        start_at = int(request.url.params.get("startAt", 0))
+        page = [_JIRA_ISSUE] if start_at == 0 else [_JIRA_ISSUE_2]
+        return httpx.Response(200, json={"issues": page, "total": 2, "startAt": start_at})
+
+    def connector():
+        return JiraConnector(
+            db,
+            project="OPS",
+            base_url="https://acme.atlassian.net",
+            email="e@x.com",
+            api_token="t",
+            transport=httpx.MockTransport(handler),
+        )
+
+    run1, docs1 = connector().run()
+    assert len(docs1) == 2
+    assert run1.cursor == "2026-05-21T10:30:00Z"
+    issue = db.scalar(select(RawDocument).where(RawDocument.external_id == "OPS-1"))
+    assert issue.source_system == "jira"
+    assert "Rolled back to v1." in issue.content
+    assert issue.url == "https://acme.atlassian.net/browse/OPS-1"
+    assert 'project = "OPS" ORDER BY updated ASC' in seen["jql"][0]
+
+    connector().run()
+    assert 'updated >= "2026-05-21 10:30"' in seen["jql"][-1]
+
+
+def test_jira_requires_configuration(db):
+    try:
+        JiraConnector(db, project="OPS", base_url=None, email="e@x.com", api_token="t")
+        raise AssertionError("expected ValueError")
+    except ValueError as exc:
+        assert "JIRA_BASE_URL" in str(exc)

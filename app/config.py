@@ -120,6 +120,10 @@ class Settings(BaseSettings):
     zoom_client_secret: str | None = None
     zoom_api_url: str = "https://api.zoom.us/v2"
     gmeet_credentials_json: str | None = None
+    jira_base_url: str | None = None
+    jira_email: str | None = None
+    jira_api_token: str | None = None
+    jira_project: str | None = None
 
     @property
     def database_url(self) -> str:
