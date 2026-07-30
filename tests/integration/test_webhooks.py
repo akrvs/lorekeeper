@@ -130,3 +130,12 @@ def test_webhooks_unconfigured_secret_is_503(client, monkeypatch):
     monkeypatch.setattr(settings, "github_webhook_secret", None)
     res = client.post("/webhooks/github", content=b"{}")
     assert res.status_code == 503
+
+
+def test_metrics_exposes_prometheus_counters(client):
+    res = client.get("/metrics")
+    assert res.status_code == 200
+    assert res.headers["content-type"].startswith("text/plain")
+    assert "lorekeeper_nodes_total " in res.text
+    assert "lorekeeper_edges_total " in res.text
+    assert "lorekeeper_raw_documents_total " in res.text

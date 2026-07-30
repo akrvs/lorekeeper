@@ -15,6 +15,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.responses import PlainTextResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -68,6 +69,25 @@ def health_db(db: Session = Depends(get_db)) -> dict:
         "graph": {"nodes": nodes, "edges": edges},
         "ontology": {"node_types": node_types, "relationship_types": rel_types},
     }
+
+
+@app.get("/metrics", tags=["meta"])
+def metrics(db: Session = Depends(get_db)) -> PlainTextResponse:
+    """Prometheus metrics in text exposition format."""
+    from app.db.models import Proposal
+    from app.db.models.source import IngestionRun, RawDocument
+
+    lines = [
+        f"lorekeeper_nodes_total {db.scalar(select(func.count()).select_from(Node))}",
+        f"lorekeeper_edges_total {db.scalar(select(func.count()).select_from(Edge))}",
+        "lorekeeper_raw_documents_total "
+        f"{db.scalar(select(func.count()).select_from(RawDocument))}",
+    ]
+    runs = db.execute(select(IngestionRun.status, func.count()).group_by(IngestionRun.status))
+    lines += [f'lorekeeper_ingestion_runs_total{{status="{s}"}} {c}' for s, c in runs]
+    proposals = db.execute(select(Proposal.status, func.count()).group_by(Proposal.status))
+    lines += [f'lorekeeper_proposals_total{{status="{s}"}} {c}' for s, c in proposals]
+    return PlainTextResponse("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
 
 
 @app.post("/ingest/{source}", tags=["ingestion"])
