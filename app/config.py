@@ -68,6 +68,8 @@ class Settings(BaseSettings):
     rbac_enabled: bool = False
     # If set, POST /ingest requires this value in the X-API-Key header.
     ingest_api_key: str | None = None
+    github_webhook_secret: str | None = None
+    slack_signing_secret: str | None = None
     oidc_jwks_url: str | None = None
     oidc_audience: str | None = None
     oidc_issuer: str | None = None
