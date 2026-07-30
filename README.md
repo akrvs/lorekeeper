@@ -26,7 +26,7 @@
 ![difficulty](https://img.shields.io/badge/difficulty-Hard-red)
 ![python](https://img.shields.io/badge/python-3.12-blue)
 ![db](https://img.shields.io/badge/postgres-16%20%2B%20pgvector-blue)
-![tests](https://img.shields.io/badge/tests-78%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-102%20passing-brightgreen)
 ![license](https://img.shields.io/badge/license-Apache--2.0-green)
 
 ```
@@ -36,7 +36,7 @@
 │ stack      : Python · FastAPI · SQLAlchemy · Postgres+pgvector  │
 │ interfaces : MCP (stdio) · REST · CLI                           │
 │ flags      : user [query the graph]  root [graph grooms itself] │
-│ status     : ACTIVE — 7 connectors · 8 MCP tools · 78 tests     │
+│ status     : ACTIVE — 8 connectors · 12 MCP tools · 102 tests   │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
