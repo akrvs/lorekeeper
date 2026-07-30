@@ -80,6 +80,27 @@ class GraphRepository:
             stmt = stmt.where(clause)
         return self.db.execute(stmt.order_by(RawDocument.source_system)).all()
 
+    def node_timeline(self, node_id: uuid.UUID, limit: int):
+        clause = _doc_clause(self.principal)
+        ts = func.coalesce(
+            RawDocument.source_updated_at, RawDocument.source_created_at, RawDocument.ingested_at
+        ).label("ts")
+        stmt = (
+            select(
+                ts,
+                RawDocument.source_system,
+                RawDocument.source_type,
+                RawDocument.title,
+                RawDocument.author,
+                RawDocument.url,
+            )
+            .join(NodeMention, NodeMention.document_id == RawDocument.id)
+            .where(NodeMention.node_id == node_id)
+        )
+        if clause is not None:
+            stmt = stmt.where(clause)
+        return self.db.execute(stmt.order_by(ts.desc().nulls_last()).limit(limit)).all()
+
     def neighbors(self, node_id: uuid.UUID, direction: str, limit: int):
         result: dict[str, list] = {"outgoing": [], "incoming": []}
         if direction in ("outgoing", "both"):

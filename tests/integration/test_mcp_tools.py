@@ -5,6 +5,7 @@ from sqlalchemy import select
 from app.db.models import Node
 from app.db.session import SessionLocal
 from app.mcp.server import (
+    get_entity_timeline,
     get_node_details,
     get_node_neighbors,
     semantic_search,
@@ -45,3 +46,13 @@ def test_traverse_repo_to_slack_thread(committed_graph):
 
 def test_invalid_uuid_is_rejected(committed_graph):
     assert "not a valid UUID" in get_node_details("not-a-uuid")
+
+
+def test_entity_timeline_lists_dated_events(committed_graph):
+    feature, _ = _nodes()
+    res = get_entity_timeline(str(feature.id))
+    assert "TIMELINE" in res and "2026-05-20" in res and "github" in res
+
+
+def test_entity_timeline_rejects_bad_uuid(committed_graph):
+    assert "not a valid UUID" in get_entity_timeline("nope")

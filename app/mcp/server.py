@@ -222,6 +222,50 @@ def get_node_details(node_id: str, principal_token: str | None = None) -> str:
 
 
 @mcp.tool()
+def get_entity_timeline(node_id: str, limit: int = 20, principal_token: str | None = None) -> str:
+    """Chronological activity feed for an entity, newest first.
+
+    Lists the dated source documents (PRs, issues, threads, pages) that mention
+    the entity, so you can see what happened around it and when.
+
+    Args:
+        node_id: UUID of the node (from semantic_search or another tool).
+        limit: Max events to return (1-100, default 20).
+        principal_token: Optional identity token to scope results (RBAC).
+    """
+    nid = _parse_uuid(node_id)
+    if nid is None:
+        return f"ERROR: '{node_id}' is not a valid UUID."
+    limit = max(1, min(int(limit), 100))
+
+    with SessionLocal() as db:
+        try:
+            principal = _principal(db, principal_token)
+        except PermissionError as exc:
+            return f"ERROR: authorization failed ({exc})."
+        repo = GraphRepository(db, principal)
+        node = repo.get_node(nid)
+        if node is None:
+            return f"No node found with id {node_id} (or not authorized)."
+        rows = repo.node_timeline(nid, limit)
+        AuditLogger(db).record(principal, "get_entity_timeline", {"node_id": node_id}, [nid])
+
+    if not rows:
+        return f"No activity found for {_node_line(node.name, node.node_type, node.id)}."
+    lines = [
+        f"TIMELINE for {_node_line(node.name, node.node_type, node.id)} "
+        f"({len(rows)} event(s), newest first):"
+    ]
+    for ts, src, stype, title, author, url in rows:
+        when = ts.date().isoformat() if ts else "(undated)"
+        lines.append(
+            f"  {when}  [{src}/{stype}] {title or '(untitled)'}"
+            f"  by {author or 'unknown'}  {url or '(no url)'}"
+        )
+    return "\n".join(lines)
+
+
+@mcp.tool()
 def get_node_neighbors(
     node_id: str, direction: str = "both", limit: int = 50, principal_token: str | None = None
 ) -> str:
