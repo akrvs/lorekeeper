@@ -5,6 +5,7 @@ from sqlalchemy import select
 from app.db.models import Node
 from app.db.session import SessionLocal
 from app.mcp.server import (
+    ask,
     export_subgraph,
     get_entity_timeline,
     get_graph_stats,
@@ -58,6 +59,15 @@ def test_entity_timeline_lists_dated_events(committed_graph):
 
 def test_entity_timeline_rejects_bad_uuid(committed_graph):
     assert "not a valid UUID" in get_entity_timeline("nope")
+
+
+def test_ask_returns_entities_connections_and_sources(committed_graph):
+    feature, _ = _nodes()
+    res = ask(f"{feature.name}\n{feature.summary}", limit=2)
+    assert "ANSWER CONTEXT" in res
+    assert "checkout-v2" in res
+    assert "SOURCES (" in res and "github" in res
+    assert "-[" in res
 
 
 def test_export_subgraph_returns_mermaid(committed_graph):

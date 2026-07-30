@@ -441,6 +441,59 @@ def get_graph_stats(principal_token: str | None = None) -> str:
     return "\n".join(lines)
 
 
+@mcp.tool()
+def ask(question: str, limit: int = 3, principal_token: str | None = None) -> str:
+    """Answer a question from the graph in one call: search, connect, cite.
+
+    Combines semantic_search, get_node_neighbors and source provenance into a
+    single response: the entities most relevant to the question, what each one
+    connects to, and the source documents (with URLs) behind each claim. Use
+    the returned node ids with the other tools to dig deeper.
+
+    Args:
+        question: Natural-language question about the organization.
+        limit: Max entities to report (1-10, default 3).
+        principal_token: Optional identity token to scope results (RBAC).
+    """
+    limit = max(1, min(int(limit), 10))
+    with SessionLocal() as db:
+        try:
+            principal = _principal(db, principal_token)
+        except PermissionError as exc:
+            return f"ERROR: authorization failed ({exc})."
+        try:
+            qvec = get_llm_provider().embed([question])[0]
+        except Exception as exc:  # noqa: BLE001
+            return (
+                "ERROR: embedding provider unavailable "
+                f"({exc}). Configure AZURE_OPENAI_* or set LLM_PROVIDER=stub."
+            )
+        repo = GraphRepository(db, principal)
+        hits = repo.semantic_search(qvec, None, limit)
+        AuditLogger(db).record(principal, "ask", {"question": question}, [n.id for n, _ in hits])
+        if not hits:
+            return f'No visible entities found for "{question}".'
+
+        out = [f'ANSWER CONTEXT for "{question}" — {len(hits)} entities, best match first:']
+        for node, dist in hits:
+            out.append("")
+            out.append(f"ENTITY {_node_line(node.name, node.node_type, node.id)}")
+            out.append(f"  similarity: {1.0 - float(dist):.3f}")
+            out.append(f"  summary: {node.summary or '(none)'}")
+            neighbors = repo.neighbors(node.id, "both", 5)
+            for rel, _conf, _weight, tid, tname, ttype in neighbors["outgoing"]:
+                out.append(f"  -[{rel}]->  {_node_line(tname, ttype, tid)}")
+            for rel, _conf, _weight, sid, sname, stype in neighbors["incoming"]:
+                out.append(f"  <-[{rel}]-  {_node_line(sname, stype, sid)}")
+            sources = repo.node_sources(node.id)
+            out.append(f"  SOURCES ({len(sources)}):")
+            if not sources:
+                out.append("    (none visible)")
+            for src, stype, title, url in sources:
+                out.append(f"    - [{src}/{stype}] {title or '(untitled)'}  {url or '(no url)'}")
+        return "\n".join(out)
+
+
 def _mermaid_label(name: str, node_type: str) -> str:
     clean = name.replace('"', "'").replace("[", "(").replace("]", ")")
     return f'"{clean} ({node_type})"'
