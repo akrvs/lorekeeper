@@ -80,6 +80,9 @@ class Settings(BaseSettings):
     cache_ttl_seconds: int = 60
     redis_url: str = "redis://redis:6379/0"
 
+    sync_sources: str | None = None
+    sync_interval_seconds: int = 3600
+
     # --- Proposals / self-maintenance ----------------------------------------
     # Proposals at/above this confidence apply without human review (still
     # audited + rollback-able). None (the default) disables autonomy entirely:
