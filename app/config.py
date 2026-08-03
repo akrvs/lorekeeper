@@ -143,6 +143,11 @@ class Settings(BaseSettings):
     confluence_email: str | None = None
     confluence_api_token: str | None = None
     confluence_space: str | None = None  # optional space key filter
+    imap_host: str | None = None
+    imap_user: str | None = None
+    imap_password: str | None = None
+    imap_folder: str = "INBOX"
+    imap_port: int = 993  # SSL
 
     @property
     def database_url(self) -> str:

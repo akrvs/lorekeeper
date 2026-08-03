@@ -18,6 +18,7 @@ from app.connectors.confluence import ConfluenceConnector
 from app.connectors.factory import ConnectorFactory
 from app.connectors.github import GitHubConnector
 from app.connectors.gmeet import GoogleMeetConnector
+from app.connectors.imap import ImapConnector
 from app.connectors.jira import JiraConnector
 from app.connectors.linear import LinearConnector
 from app.connectors.local import LocalConnector
@@ -32,6 +33,7 @@ __all__ = [
     "ConnectorFactory",
     "ConfluenceConnector",
     "GitHubConnector",
+    "ImapConnector",
     "SlackConnector",
     "JiraConnector",
     "LinearConnector",
