@@ -174,6 +174,77 @@ def semantic_search(
 
 
 @mcp.tool()
+def hybrid_search(
+    query: str, node_type: str | None = None, limit: int = 5, principal_token: str | None = None
+) -> str:
+    """Find entities by meaning AND exact wording, fused into one ranking.
+
+    Runs semantic (pgvector) and keyword (Postgres full-text) search side by
+    side and merges them with reciprocal rank fusion, so exact names and
+    identifiers stop losing to fuzzy matches. Prefer this over semantic_search
+    when the query contains a literal name, id, or error string.
+
+    Args:
+        query: Natural-language query, may contain exact names/identifiers.
+        node_type: Optional filter, e.g. 'feature', 'incident', 'repository'.
+        limit: Max results (1-50, default 5).
+        principal_token: Optional identity token to scope results (RBAC).
+    """
+    limit = max(1, min(int(limit), 50))
+    with SessionLocal() as db:
+        try:
+            principal = _principal(db, principal_token)
+        except PermissionError as exc:
+            return f"ERROR: authorization failed ({exc})."
+        repo = GraphRepository(db, principal)
+
+        warning = ""
+        sem: list = []
+        try:
+            qvec = get_llm_provider().embed([query])[0]
+            sem = repo.semantic_search(qvec, node_type, limit)
+        except Exception as exc:  # noqa: BLE001
+            warning = f"(semantic leg unavailable: {exc} — keyword results only)\n"
+        kw = repo.keyword_search(query, node_type, limit)
+
+        # Reciprocal rank fusion: score = sum over lists of 1 / (60 + rank).
+        entries: dict = {}
+        for i, (node, _dist) in enumerate(sem, 1):
+            entry = entries.setdefault(node.id, {"node": node, "score": 0.0, "legs": []})
+            entry["score"] += 1.0 / (60 + i)
+            entry["legs"].append(f"semantic #{i}")
+        for i, (node, _rank) in enumerate(kw, 1):
+            entry = entries.setdefault(node.id, {"node": node, "score": 0.0, "legs": []})
+            entry["score"] += 1.0 / (60 + i)
+            entry["legs"].append(f"keyword #{i}")
+        ranked = sorted(entries.values(), key=lambda e: e["score"], reverse=True)[:limit]
+        AuditLogger(db).record(
+            principal,
+            "hybrid_search",
+            {"query": query, "node_type": node_type},
+            [e["node"].id for e in ranked],
+        )
+
+        if not ranked:
+            return f'No visible entities found for query "{query}".'
+        out = [
+            warning
+            + f'Top {len(ranked)} hybrid matches for "{query}"'
+            + (f" (node_type={node_type})" if node_type else "")
+            + ":\n"
+        ]
+        for i, entry in enumerate(ranked, 1):
+            node = entry["node"]
+            out.append(
+                f"{i}. {_node_line(node.name, node.node_type, node.id)}\n"
+                f"   matched: {', '.join(entry['legs'])}\n"
+                f"   summary: {node.summary or '(none)'}\n"
+                f"   properties: {_props(node.properties)}"
+            )
+        return "\n".join(out)
+
+
+@mcp.tool()
 def get_node_details(node_id: str, principal_token: str | None = None) -> str:
     """Return everything known about one entity, including provenance.
 

@@ -11,7 +11,7 @@ from app.db.models import Edge, Node
 from app.db.models.proposal import Proposal
 from app.db.session import SessionLocal
 from app.llm.stub import deterministic_embedding
-from app.mcp.server import find_connection, get_recent_changes, get_stale_nodes
+from app.mcp.server import find_connection, get_recent_changes, get_stale_nodes, hybrid_search
 
 _CLEANUP = "node_mentions, edges, nodes, raw_documents, ingestion_runs, proposals, audit_log"
 
@@ -59,6 +59,45 @@ def test_get_stale_nodes_empty_queue(schema):
         db.execute(text(f"TRUNCATE {_CLEANUP} RESTART IDENTITY CASCADE"))
         db.commit()
     assert "No stale-flagged nodes" in get_stale_nodes()
+
+
+@pytest.fixture
+def committed_services(schema):
+    with SessionLocal() as db:
+        db.execute(text(f"TRUNCATE {_CLEANUP} RESTART IDENTITY CASCADE"))
+        db.commit()
+        pay = _node("payments-service")
+        pay.summary = "Handles card payments and refunds"
+        search = _node("search-api")
+        search.summary = "Full text search backend"
+        who = _node("alice", node_type="user")
+        db.add_all([pay, search, who])
+        db.commit()
+        ids = {"pay": str(pay.id), "search": str(search.id), "who": str(who.id)}
+    yield ids
+    with SessionLocal() as s:
+        s.execute(text(f"TRUNCATE {_CLEANUP} RESTART IDENTITY CASCADE"))
+        s.commit()
+
+
+def test_hybrid_search_finds_exact_wording(committed_services):
+    ids = committed_services
+    out = hybrid_search("card payments")
+    assert ids["pay"] in out
+    assert "keyword #" in out
+    assert "hybrid matches" in out
+
+
+def test_hybrid_search_type_filter_and_empty(committed_services):
+    ids = committed_services
+    out = hybrid_search("card payments", node_type="user")
+    assert ids["pay"] not in out
+    # The semantic leg always returns nearest neighbours, so the empty message
+    # only appears when nothing is visible at all.
+    with SessionLocal() as db:
+        db.execute(text(f"TRUNCATE {_CLEANUP} RESTART IDENTITY CASCADE"))
+        db.commit()
+    assert "No visible entities" in hybrid_search("anything")
 
 
 @pytest.fixture

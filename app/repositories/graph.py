@@ -8,7 +8,7 @@ CYCLE detection, and a result cap.
 
 import uuid
 
-from sqlalchemy import func, select, text
+from sqlalchemy import Text, func, select, text
 from sqlalchemy.orm import Session, aliased
 
 from app.config import settings
@@ -46,6 +46,25 @@ class GraphRepository:
         if node_type:
             stmt = stmt.where(Node.node_type == node_type)
         stmt = self._restrict(stmt).order_by(distance).limit(limit)
+        return self.db.execute(stmt).all()
+
+    def keyword_search(self, query: str, node_type: str | None, limit: int):
+        """Full-text rank over name, summary and properties.
+
+        The tsvector is computed on the fly — fine at current graph sizes.
+        # ponytail: on-the-fly to_tsvector; add a GIN expression index when
+        # node counts make this the slow path.
+        """
+        doc = func.to_tsvector(
+            "english",
+            func.concat_ws(" ", Node.name, Node.summary, Node.properties.cast(Text)),
+        )
+        tsq = func.websearch_to_tsquery("english", query)
+        rank = func.ts_rank(doc, tsq).label("rank")
+        stmt = select(Node, rank).where(Node.canonical_node_id.is_(None), doc.op("@@")(tsq))
+        if node_type:
+            stmt = stmt.where(Node.node_type == node_type)
+        stmt = self._restrict(stmt).order_by(rank.desc(), Node.name).limit(limit)
         return self.db.execute(stmt).all()
 
     def get_node(self, node_id: uuid.UUID) -> Node | None:

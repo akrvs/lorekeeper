@@ -21,6 +21,7 @@ _EXPECTED_TOOLS = [
     "get_node_neighbors",
     "get_recent_changes",
     "get_stale_nodes",
+    "hybrid_search",
     "reject_proposal",
     "review_proposals",
     "rollback_proposal",
