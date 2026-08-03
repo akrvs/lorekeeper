@@ -112,6 +112,7 @@ class Settings(BaseSettings):
     stale_scan_limit: int = 200
     hygiene_scan_limit: int = 100
     hygiene_edge_confidence: float = 0.3
+    contradiction_scan_limit: int = 100
     # Bootstrap: how many recent documents to sample for missing-type discovery.
     bootstrap_sample_size: int = 25
 
