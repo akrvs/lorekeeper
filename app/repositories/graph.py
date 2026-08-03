@@ -235,3 +235,52 @@ ORDER BY n.id, walk.depth
         }
         rows = self.db.execute(sql, params).all()
         return sorted(rows, key=lambda r: r.depth)[:limit]
+
+    def find_path(self, start: Node, target_id: uuid.UUID, max_depth: int):
+        """Shortest visible path from start to one specific node (edges both ways)."""
+        max_depth = max(1, min(int(max_depth), settings.traverse_max_depth))
+        vis_fragment, vis_params = visibility_sql(self.principal, "nn.id")
+
+        self.db.execute(
+            text(f"SET LOCAL statement_timeout = {int(settings.traverse_statement_timeout_ms)}")
+        )
+
+        sql = text(
+            f"""
+WITH RECURSIVE walk AS (
+  SELECT CAST(:start_id AS uuid) AS node_id,
+         ARRAY[CAST(:start_name AS text)] AS name_path,
+         ARRAY[]::text[] AS rel_path,
+         0 AS depth
+  UNION ALL
+  SELECT step.next_id,
+         walk.name_path || nn.name,
+         walk.rel_path || (step.dir || step.rel),
+         walk.depth + 1
+  FROM walk
+  JOIN LATERAL (
+    SELECT
+      CASE WHEN e.source_id = walk.node_id THEN e.target_id ELSE e.source_id END AS next_id,
+      CASE WHEN e.source_id = walk.node_id THEN '>' ELSE '<' END AS dir,
+      e.relationship AS rel
+    FROM edges e
+    WHERE e.source_id = walk.node_id OR e.target_id = walk.node_id
+  ) AS step ON TRUE
+  JOIN nodes nn ON nn.id = step.next_id
+  WHERE walk.depth < :max_depth AND {vis_fragment}
+) CYCLE node_id SET is_cycle USING cyclepath
+SELECT walk.depth, walk.name_path, walk.rel_path
+FROM walk
+WHERE walk.depth > 0 AND NOT walk.is_cycle AND walk.node_id = :target_id
+ORDER BY walk.depth
+LIMIT 1
+"""
+        )
+        params = {
+            "start_id": str(start.id),
+            "start_name": start.name,
+            "max_depth": max_depth,
+            "target_id": str(target_id),
+            **vis_params,
+        }
+        return self.db.execute(sql, params).first()

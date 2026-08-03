@@ -14,6 +14,7 @@ _EXPECTED_TOOLS = [
     "approve_proposal",
     "ask",
     "export_subgraph",
+    "find_connection",
     "get_entity_timeline",
     "get_graph_stats",
     "get_node_details",

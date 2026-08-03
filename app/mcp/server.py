@@ -400,6 +400,61 @@ def traverse_graph_path(
 
 
 @mcp.tool()
+def find_connection(
+    node_a: str, node_b: str, max_depth: int = 4, principal_token: str | None = None
+) -> str:
+    """How are two specific entities connected? Returns the shortest path.
+
+    Complements traverse_graph_path (node to node *type*): this answers
+    "how does A relate to B" for two concrete node ids, following edges in
+    both directions.
+
+    Args:
+        node_a: UUID of the first node.
+        node_b: UUID of the second node.
+        max_depth: Max hops to search (default 4).
+        principal_token: Optional identity token to scope the search (RBAC).
+    """
+    aid = _parse_uuid(node_a)
+    if aid is None:
+        return f"ERROR: '{node_a}' is not a valid UUID."
+    bid = _parse_uuid(node_b)
+    if bid is None:
+        return f"ERROR: '{node_b}' is not a valid UUID."
+    if aid == bid:
+        return "ERROR: node_a and node_b are the same node."
+
+    with SessionLocal() as db:
+        try:
+            principal = _principal(db, principal_token)
+        except PermissionError as exc:
+            return f"ERROR: authorization failed ({exc})."
+        repo = GraphRepository(db, principal)
+        a = repo.get_node(aid)
+        if a is None:
+            return f"No node found with id {node_a} (or not authorized)."
+        b = repo.get_node(bid)
+        if b is None:
+            return f"No node found with id {node_b} (or not authorized)."
+        row = repo.find_path(a, bid, max_depth)
+        AuditLogger(db).record(
+            principal, "find_connection", {"node_a": node_a, "node_b": node_b}, [aid, bid]
+        )
+
+    if row is None:
+        return (
+            f"No path between {_node_line(a.name, a.node_type, a.id)} and "
+            f"{_node_line(b.name, b.node_type, b.id)} within {max_depth} hop(s)."
+        )
+    return (
+        f"CONNECTION ({row.depth} hop(s)) between "
+        f"{_node_line(a.name, a.node_type, a.id)} and "
+        f"{_node_line(b.name, b.node_type, b.id)}:\n"
+        f"  {_render_path(row.name_path, row.rel_path)}"
+    )
+
+
+@mcp.tool()
 def get_graph_stats(principal_token: str | None = None) -> str:
     """Health snapshot of the knowledge graph.
 
