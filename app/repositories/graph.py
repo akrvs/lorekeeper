@@ -119,6 +119,13 @@ class GraphRepository:
         ).limit(limit)
         return self.db.scalars(stmt).all()
 
+    def recent_nodes(self, since, limit: int):
+        """Canonical nodes created since a cutoff, newest first."""
+        stmt = self._restrict(
+            select(Node).where(Node.canonical_node_id.is_(None), Node.created_at >= since)
+        )
+        return self.db.scalars(stmt.order_by(Node.created_at.desc()).limit(limit)).all()
+
     def node_timeline(self, node_id: uuid.UUID, limit: int):
         clause = _doc_clause(self.principal)
         ts = func.coalesce(

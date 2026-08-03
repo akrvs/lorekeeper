@@ -22,13 +22,14 @@ import json
 import logging
 import sys
 import uuid
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
 
 from app.cache import get_cache, make_key
 from app.config import settings
 from app.db.init_db import wait_for_db
-from app.db.models.proposal import Proposal
+from app.db.models.proposal import APPLIED_STATUSES, Proposal
 from app.db.models.source import IngestionRun
 from app.db.session import SessionLocal, engine
 from app.llm import get_llm_provider
@@ -469,6 +470,57 @@ def get_stale_nodes(limit: int = 20, principal_token: str | None = None) -> str:
         since = node.properties.get("stale_since") or "(unknown)"
         lines.append(f"- {_node_line(node.name, node.node_type, node.id)}  stale_since={since}")
     return "\n".join(lines)
+
+
+@mcp.tool()
+def get_recent_changes(days: int = 7, limit: int = 25, principal_token: str | None = None) -> str:
+    """What changed in the graph recently: new entities and applied maintenance.
+
+    Answers "what's new since last week": entities created in the window and
+    the self-maintenance proposals (merges, stale flags, schema additions)
+    that were applied in it.
+
+    Args:
+        days: Window size in days (1-365, default 7).
+        limit: Max items per section (1-100, default 25).
+        principal_token: Optional identity token to scope results (RBAC).
+    """
+    days = max(1, min(int(days), 365))
+    limit = max(1, min(int(limit), 100))
+    since = datetime.now(UTC) - timedelta(days=days)
+
+    with SessionLocal() as db:
+        try:
+            principal = _principal(db, principal_token)
+        except PermissionError as exc:
+            return f"ERROR: authorization failed ({exc})."
+        nodes = GraphRepository(db, principal).recent_nodes(since, limit)
+        proposals = db.scalars(
+            select(Proposal)
+            .where(Proposal.status.in_(APPLIED_STATUSES), Proposal.applied_at >= since)
+            .order_by(Proposal.applied_at.desc())
+            .limit(limit)
+        ).all()
+        AuditLogger(db).record(
+            principal, "get_recent_changes", {"days": days}, [n.id for n in nodes]
+        )
+
+        lines = [f"GRAPH CHANGES in the last {days} day(s):", ""]
+        lines.append(f"NEW ENTITIES ({len(nodes)}):")
+        if not nodes:
+            lines.append("  (none)")
+        for node in nodes:
+            lines.append(
+                f"  {node.created_at.date().isoformat()}  "
+                f"{_node_line(node.name, node.node_type, node.id)}"
+            )
+        lines.append("")
+        lines.append(f"APPLIED MAINTENANCE ({len(proposals)}):")
+        if not proposals:
+            lines.append("  (none)")
+        for p in proposals:
+            lines.append(f"  {p.applied_at.date().isoformat()}  {_proposal_line(p)}")
+        return "\n".join(lines)
 
 
 @mcp.tool()
