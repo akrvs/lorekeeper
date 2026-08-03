@@ -139,6 +139,10 @@ class Settings(BaseSettings):
     linear_api_key: str | None = None
     linear_team: str | None = None  # optional team key filter, e.g. "ENG"
     linear_api_url: str = "https://api.linear.app"
+    confluence_base_url: str | None = None  # e.g. https://acme.atlassian.net
+    confluence_email: str | None = None
+    confluence_api_token: str | None = None
+    confluence_space: str | None = None  # optional space key filter
 
     @property
     def database_url(self) -> str:

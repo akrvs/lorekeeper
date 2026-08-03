@@ -5,7 +5,13 @@ import json
 import httpx
 from sqlalchemy import select, text
 
-from app.connectors import GitHubConnector, JiraConnector, LinearConnector, SlackConnector
+from app.connectors import (
+    ConfluenceConnector,
+    GitHubConnector,
+    JiraConnector,
+    LinearConnector,
+    SlackConnector,
+)
 from app.db.models import RawDocument
 
 _gh_calls = {"pulls": 0}
@@ -343,6 +349,71 @@ def test_linear_pagination_comments_and_cursor(db):
 
     connector().run()
     assert seen["filters"][-1]["updatedAt"] == {"gt": "2026-06-02T10:15:00.000Z"}
+
+
+_CONFLUENCE_PAGE = {
+    "id": "98765",
+    "title": "Payments runbook",
+    "body": {"storage": {"value": "<h1>Runbook</h1><p>Rotate the API key &amp; restart.</p>"}},
+    "version": {"when": "2026-06-10T12:00:00.000Z"},
+    "space": {"key": "OPS"},
+    "history": {"createdBy": {"displayName": "Alice"}, "createdDate": "2026-06-01T08:00:00.000Z"},
+    "_links": {"webui": "/spaces/OPS/pages/98765/Payments+runbook"},
+}
+_CONFLUENCE_COMMENT = {
+    "body": {"storage": {"value": "<p>Updated for the new gateway.</p>"}},
+    "history": {"createdBy": {"displayName": "Bob"}},
+}
+
+
+def test_confluence_pages_comments_and_cursor(db):
+    db.execute(text("TRUNCATE raw_documents, ingestion_runs RESTART IDENTITY CASCADE"))
+    db.commit()
+    seen = {"cql": []}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/wiki/rest/api/content/search":
+            seen["cql"].append(request.url.params.get("cql"))
+            start = int(request.url.params.get("start", 0))
+            results = [_CONFLUENCE_PAGE] if start == 0 else []
+            return httpx.Response(200, json={"results": results})
+        if path == "/wiki/rest/api/content/98765/child/comment":
+            return httpx.Response(200, json={"results": [_CONFLUENCE_COMMENT]})
+        return httpx.Response(404, json={})
+
+    def connector():
+        return ConfluenceConnector(
+            db,
+            space="OPS",
+            base_url="https://acme.atlassian.net",
+            email="e@x.com",
+            api_token="t",
+            transport=httpx.MockTransport(handler),
+        )
+
+    run1, docs1 = connector().run()
+    assert len(docs1) == 1
+    assert run1.cursor == "2026-06-10T12:00:00Z"
+    page = db.scalar(select(RawDocument).where(RawDocument.external_id == "98765"))
+    assert page.source_system == "confluence"
+    assert "Rotate the API key & restart." in page.content
+    assert "<p>" not in page.content
+    assert "comment by Bob: Updated for the new gateway." in page.content
+    assert page.url == "https://acme.atlassian.net/wiki/spaces/OPS/pages/98765/Payments+runbook"
+    assert page.resource_key == "OPS"
+    assert 'space = "OPS"' in seen["cql"][0] and "lastmodified >=" not in seen["cql"][0]
+
+    connector().run()
+    assert 'lastmodified >= "2026/06/10 12:00"' in seen["cql"][-1]
+
+
+def test_confluence_requires_configuration(db):
+    try:
+        ConfluenceConnector(db, base_url=None, email="e@x.com", api_token="t")
+        raise AssertionError("expected ValueError")
+    except ValueError as exc:
+        assert "CONFLUENCE_BASE_URL" in str(exc)
 
 
 def test_linear_requires_api_key(db, monkeypatch):

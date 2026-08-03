@@ -12,9 +12,10 @@ from app.connectors._http import (
     ConnectorHTTPError,
 )
 from app.connectors.base import BaseConnector, RawDoc
-from app.connectors.factory import ConnectorFactory
 
 # Import drivers for their registration side effects.
+from app.connectors.confluence import ConfluenceConnector
+from app.connectors.factory import ConnectorFactory
 from app.connectors.github import GitHubConnector
 from app.connectors.gmeet import GoogleMeetConnector
 from app.connectors.jira import JiraConnector
@@ -29,6 +30,7 @@ __all__ = [
     "BaseConnector",
     "RawDoc",
     "ConnectorFactory",
+    "ConfluenceConnector",
     "GitHubConnector",
     "SlackConnector",
     "JiraConnector",
