@@ -99,6 +99,33 @@ def cmd_show(db, prefix: str) -> None:
         print("  rollback   : snapshot available — `rollback` restores the prior graph")
 
 
+def cmd_approve_all(db, min_confidence: float, kind: str | None, by: str) -> int:
+    """Approve every pending proposal at or above a confidence threshold."""
+    stmt = (
+        select(Proposal)
+        .where(Proposal.status == "pending", Proposal.confidence >= min_confidence)
+        .order_by(Proposal.confidence.desc(), Proposal.created_at)
+    )
+    if kind:
+        stmt = stmt.where(Proposal.kind == kind)
+    rows = db.scalars(stmt).all()
+    if not rows:
+        print(f"Nothing to approve at confidence >= {min_confidence:.2f}.")
+        return 0
+    engine = ProposalEngine(db)
+    ok = failed = 0
+    for p in rows:
+        try:
+            decided = engine.approve(p.id, reviewed_by=by)
+            ok += 1
+            print(f"ok: {str(decided.id)[:8]} ({decided.kind}) -> {decided.status}")
+        except ProposalError as exc:
+            failed += 1
+            print(f"error: {str(p.id)[:8]} ({p.kind}) — {exc}", file=sys.stderr)
+    print(f"\napproved {ok}, failed {failed}, of {len(rows)} candidate(s).")
+    return 0 if failed == 0 else 1
+
+
 def _decide(db, prefix: str, action: str, by: str) -> None:
     p = _find(db, prefix)
     engine = ProposalEngine(db)
@@ -129,6 +156,17 @@ def _main() -> int:
         p_cmd = sub.add_parser(name, help=help_text)
         p_cmd.add_argument("id")
         p_cmd.add_argument("--by", default=default_reviewer())
+    p_all = sub.add_parser(
+        "approve-all", help="Approve every pending proposal above a confidence threshold."
+    )
+    p_all.add_argument(
+        "--min-confidence",
+        type=float,
+        required=True,
+        help="Only proposals with confidence >= this are approved.",
+    )
+    p_all.add_argument("--kind", help="Restrict to one proposal kind, e.g. entity_merge.")
+    p_all.add_argument("--by", default=default_reviewer())
     args = parser.parse_args()
 
     if args.cmd == "tui":
@@ -142,6 +180,8 @@ def _main() -> int:
                 cmd_list(db, None if args.all else args.status, args.kind)
             elif args.cmd == "show":
                 cmd_show(db, args.id)
+            elif args.cmd == "approve-all":
+                return cmd_approve_all(db, args.min_confidence, args.kind, args.by)
             else:
                 _decide(db, args.id, args.cmd, args.by)
         except ProposalError as exc:
