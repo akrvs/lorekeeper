@@ -8,6 +8,7 @@ from sqlalchemy import select, text
 from app.connectors import (
     ConfluenceConnector,
     GitHubConnector,
+    GoogleDriveConnector,
     JiraConnector,
     LinearConnector,
     SlackConnector,
@@ -406,6 +407,79 @@ def test_confluence_pages_comments_and_cursor(db):
 
     connector().run()
     assert 'lastmodified >= "2026/06/10 12:00"' in seen["cql"][-1]
+
+
+_GDOC = {
+    "id": "doc1",
+    "name": "Q3 platform spec",
+    "mimeType": "application/vnd.google-apps.document",
+    "modifiedTime": "2026-06-15T10:00:00.000Z",
+    "createdTime": "2026-06-01T10:00:00.000Z",
+    "webViewLink": "https://docs.google.com/document/d/doc1",
+    "owners": [{"displayName": "Alice"}],
+}
+_GTXT = {
+    "id": "txt1",
+    "name": "notes.txt",
+    "mimeType": "text/plain",
+    "modifiedTime": "2026-06-16T11:30:00.000Z",
+    "createdTime": "2026-06-02T10:00:00.000Z",
+    "webViewLink": "https://drive.google.com/file/d/txt1",
+    "owners": [{"displayName": "Bob"}],
+}
+_GBIN = {
+    "id": "bin1",
+    "name": "diagram.png",
+    "mimeType": "image/png",
+    "modifiedTime": "2026-06-17T09:00:00.000Z",
+    "createdTime": "2026-06-03T10:00:00.000Z",
+}
+
+
+def test_gdrive_exports_downloads_and_cursor(db):
+    db.execute(text("TRUNCATE raw_documents, ingestion_runs RESTART IDENTITY CASCADE"))
+    db.commit()
+    seen = {"q": []}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/drive/v3/files":
+            assert request.headers["Authorization"] == "Bearer tok"
+            seen["q"].append(request.url.params.get("q"))
+            return httpx.Response(200, json={"files": [_GDOC, _GTXT, _GBIN]})
+        if path == "/drive/v3/files/doc1/export":
+            assert request.url.params.get("mimeType") == "text/plain"
+            return httpx.Response(200, text="Spec body: unify the queues.")
+        if path == "/drive/v3/files/txt1":
+            assert request.url.params.get("alt") == "media"
+            return httpx.Response(200, text="Plain notes.")
+        return httpx.Response(404, json={})
+
+    def connector():
+        return GoogleDriveConnector(db, access_token="tok", transport=httpx.MockTransport(handler))
+
+    run1, docs1 = connector().run()
+    assert len(docs1) == 2  # the PNG is skipped
+    assert run1.cursor == "2026-06-16T11:30:00Z"
+    doc = db.scalar(select(RawDocument).where(RawDocument.external_id == "doc1"))
+    assert doc.source_system == "gdrive"
+    assert "Spec body: unify the queues." in doc.content
+    assert doc.author == "Alice" and doc.url == "https://docs.google.com/document/d/doc1"
+    assert "modifiedTime" not in (seen["q"][0] or "")
+
+    connector().run()
+    assert "modifiedTime > '2026-06-16T11:30:00Z'" in seen["q"][-1]
+
+
+def test_gdrive_requires_credentials(db, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "google_application_credentials", None)
+    try:
+        GoogleDriveConnector(db)
+        raise AssertionError("expected ValueError")
+    except ValueError as exc:
+        assert "GOOGLE_APPLICATION_CREDENTIALS" in str(exc)
 
 
 def test_confluence_requires_configuration(db):

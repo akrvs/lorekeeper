@@ -16,6 +16,7 @@ from app.connectors.base import BaseConnector, RawDoc
 # Import drivers for their registration side effects.
 from app.connectors.confluence import ConfluenceConnector
 from app.connectors.factory import ConnectorFactory
+from app.connectors.gdrive import GoogleDriveConnector
 from app.connectors.github import GitHubConnector
 from app.connectors.gmeet import GoogleMeetConnector
 from app.connectors.imap import ImapConnector
@@ -33,6 +34,7 @@ __all__ = [
     "ConnectorFactory",
     "ConfluenceConnector",
     "GitHubConnector",
+    "GoogleDriveConnector",
     "ImapConnector",
     "SlackConnector",
     "JiraConnector",

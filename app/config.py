@@ -148,6 +148,9 @@ class Settings(BaseSettings):
     imap_password: str | None = None
     imap_folder: str = "INBOX"
     imap_port: int = 993  # SSL
+    google_application_credentials: str | None = None  # service-account JSON path
+    gdrive_folder_id: str | None = None  # optional folder scope
+    gdrive_api_url: str = "https://www.googleapis.com"
 
     @property
     def database_url(self) -> str:
