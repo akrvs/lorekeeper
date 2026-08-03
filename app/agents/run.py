@@ -46,8 +46,8 @@ def _main() -> int:
     parser.add_argument(
         "job",
         nargs="?",
-        choices=["digest"],
-        help="Run a read-only job instead of the proposal-filing agents.",
+        choices=["digest", "importance"],
+        help="Run a standalone job instead of the proposal-filing agents.",
     )
     parser.add_argument(
         "--agent",
@@ -64,6 +64,11 @@ def _main() -> int:
             from app.agents.digest import build_digest
 
             print(build_digest(db, args.days))
+            return 0
+        if args.job == "importance":
+            from app.agents.importance import compute_importance
+
+            print(f"importance stamped on {compute_importance(db)} node(s)")
             return 0
         names = [args.agent] if args.agent else AgentFactory.available()
         report = run_agents(db, names)
