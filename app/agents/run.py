@@ -44,16 +44,28 @@ def _main() -> int:
         description="Scan the graph with maintenance agents and file proposals.",
     )
     parser.add_argument(
+        "job",
+        nargs="?",
+        choices=["digest"],
+        help="Run a read-only job instead of the proposal-filing agents.",
+    )
+    parser.add_argument(
         "--agent",
         choices=AgentFactory.available(),
         help="Run a single agent (default: all of them).",
     )
+    parser.add_argument("--days", type=int, default=7, help="Window for the digest job.")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, stream=sys.stderr)
     init_db()
-    names = [args.agent] if args.agent else AgentFactory.available()
     with SessionLocal() as db:
+        if args.job == "digest":
+            from app.agents.digest import build_digest
+
+            print(build_digest(db, args.days))
+            return 0
+        names = [args.agent] if args.agent else AgentFactory.available()
         report = run_agents(db, names)
     print(json.dumps(report, indent=2))
     return 0
