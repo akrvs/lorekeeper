@@ -113,6 +113,10 @@ class Settings(BaseSettings):
     hygiene_scan_limit: int = 100
     hygiene_edge_confidence: float = 0.3
     contradiction_scan_limit: int = 100
+    # Edge suggester candidate gates: semantic closeness + evidence floor.
+    edge_suggest_scan_limit: int = 50
+    edge_suggest_vec_threshold: float = 0.2
+    edge_suggest_min_mentions: int = 2
     # Bootstrap: how many recent documents to sample for missing-type discovery.
     bootstrap_sample_size: int = 25
 

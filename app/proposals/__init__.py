@@ -6,6 +6,7 @@ Importing this package registers all built-in handlers (mirrors how
 
 from app.proposals import (  # noqa: F401  (register handlers)
     conflict,
+    edge_add,
     hygiene,
     merge,
     schema_types,
