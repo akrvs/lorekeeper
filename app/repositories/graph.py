@@ -106,6 +106,19 @@ class GraphRepository:
         stale = self.db.scalar(stale_stmt)
         return node_counts, edge_counts, stale
 
+    def stale_nodes(self, limit: int):
+        """Stale-flagged canonical nodes, oldest evidence first."""
+        stmt = self._restrict(
+            select(Node).where(
+                Node.canonical_node_id.is_(None),
+                func.coalesce(Node.properties["stale"].astext, "false") == "true",
+            )
+        )
+        stmt = stmt.order_by(
+            Node.properties["stale_since"].astext.asc().nulls_last(), Node.name
+        ).limit(limit)
+        return self.db.scalars(stmt).all()
+
     def node_timeline(self, node_id: uuid.UUID, limit: int):
         clause = _doc_clause(self.principal)
         ts = func.coalesce(

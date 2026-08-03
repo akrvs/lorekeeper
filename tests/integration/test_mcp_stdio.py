@@ -18,6 +18,7 @@ _EXPECTED_TOOLS = [
     "get_graph_stats",
     "get_node_details",
     "get_node_neighbors",
+    "get_stale_nodes",
     "reject_proposal",
     "review_proposals",
     "rollback_proposal",

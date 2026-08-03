@@ -442,6 +442,36 @@ def get_graph_stats(principal_token: str | None = None) -> str:
 
 
 @mcp.tool()
+def get_stale_nodes(limit: int = 20, principal_token: str | None = None) -> str:
+    """List stale-flagged entities, oldest evidence first.
+
+    Nodes flagged by the staleness agent carry stale=true and stale_since in
+    their properties. Facts listed here keep their citations but their newest
+    evidence has gone quiet — treat them with caution or refresh the source.
+
+    Args:
+        limit: Max nodes to return (1-100, default 20).
+        principal_token: Optional identity token to scope results (RBAC).
+    """
+    limit = max(1, min(int(limit), 100))
+    with SessionLocal() as db:
+        try:
+            principal = _principal(db, principal_token)
+        except PermissionError as exc:
+            return f"ERROR: authorization failed ({exc})."
+        rows = GraphRepository(db, principal).stale_nodes(limit)
+        AuditLogger(db).record(principal, "get_stale_nodes", {"limit": limit}, [n.id for n in rows])
+
+    if not rows:
+        return "No stale-flagged nodes — everything in the graph has fresh evidence."
+    lines = [f"{len(rows)} stale-flagged node(s), oldest evidence first:"]
+    for node in rows:
+        since = node.properties.get("stale_since") or "(unknown)"
+        lines.append(f"- {_node_line(node.name, node.node_type, node.id)}  stale_since={since}")
+    return "\n".join(lines)
+
+
+@mcp.tool()
 def ask(question: str, limit: int = 3, principal_token: str | None = None) -> str:
     """Answer a question from the graph in one call: search, connect, cite.
 
