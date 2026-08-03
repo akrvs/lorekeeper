@@ -14,7 +14,7 @@ import time
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -25,6 +25,7 @@ from app.config import settings
 from app.connectors import ConnectorAuthError, ConnectorError, ConnectorFactory
 from app.connectors.base import BaseConnector, RawDoc
 from app.connectors.github import _iso
+from app.connectors.jira import _ts as _jira_ts
 from app.db.init_db import init_db
 from app.db.models import Edge, Node, OntologyNodeType, OntologyRelationshipType
 from app.db.session import get_db
@@ -270,6 +271,101 @@ async def slack_webhook(request: Request, db: Session = Depends(get_db)) -> dict
     )
     document = _WebhookSink(db, "slack").store(doc)
     return {"status": "stored", "document_id": str(document.id)}
+
+
+def _jira_doc(payload: dict) -> RawDoc | None:
+    issue = payload.get("issue")
+    if not issue or not issue.get("key"):
+        return None
+    key = issue["key"]
+    fields = issue.get("fields") or {}
+    status = ((fields.get("status") or {}).get("name")) or "unknown"
+    summary = fields.get("summary") or ""
+    content = f"Jira {key}: {summary}\nStatus: {status}\n\n{fields.get('description') or ''}"
+    comment = payload.get("comment")
+    if comment:
+        author = (comment.get("author") or {}).get("displayName", "unknown")
+        content += f"\n\ncomment by {author}: {comment.get('body', '')}"
+    base = (issue.get("self") or "").split("/rest/")[0] or (settings.jira_base_url or "").rstrip(
+        "/"
+    )
+    return RawDoc(
+        source_type="jira_issue",
+        external_id=key,
+        resource_key=((fields.get("project") or {}).get("key")) or key.split("-")[0],
+        title=summary or key,
+        url=f"{base}/browse/{key}" if base else None,
+        author=(fields.get("creator") or {}).get("displayName"),
+        content=content,
+        raw_payload=issue,
+        source_created_at=_jira_ts(fields.get("created")),
+        source_updated_at=_jira_ts(fields.get("updated")),
+    )
+
+
+@app.post("/webhooks/jira", tags=["ingestion"])
+async def jira_webhook(
+    request: Request, token: str | None = None, db: Session = Depends(get_db)
+) -> dict:
+    """Push-based Jira ingestion (issue and comment events).
+
+    Jira Cloud does not sign webhook payloads, so the route is gated by a
+    shared secret: register the webhook URL as
+    /webhooks/jira?token=JIRA_WEBHOOK_SECRET. Issue events land in
+    raw_documents immediately and are extracted on the next pipeline run.
+    """
+    if not settings.jira_webhook_secret:
+        raise HTTPException(503, "JIRA_WEBHOOK_SECRET is not configured.")
+    if not (token and secrets.compare_digest(token, settings.jira_webhook_secret)):
+        raise HTTPException(401, "Invalid or missing token.")
+    payload = json.loads(await request.body())
+    doc = _jira_doc(payload)
+    if doc is None:
+        return {"status": "ignored", "event": payload.get("webhookEvent")}
+    document = _WebhookSink(db, "jira").store(doc)
+    return {"status": "stored", "document_id": str(document.id)}
+
+
+def _verify_notion_signature(body: bytes, signature: str | None) -> bool:
+    expected = (
+        "sha256="
+        + hmac.new(settings.notion_webhook_secret.encode(), body, hashlib.sha256).hexdigest()
+    )
+    return signature is not None and secrets.compare_digest(expected, signature)
+
+
+def _notion_resync() -> None:
+    """Notion webhook events carry ids, not content — pull the pages instead."""
+    from app.db.session import SessionLocal
+
+    with SessionLocal() as db:
+        try:
+            run_source(db, "notion")
+        except Exception as exc:  # noqa: BLE001 — a failed resync must not crash the worker
+            logger.warning("Notion webhook-triggered sync failed: %s", exc)
+
+
+@app.post("/webhooks/notion", tags=["ingestion"])
+async def notion_webhook(request: Request, background: BackgroundTasks) -> dict:
+    """Push-based Notion freshness (page/database change events).
+
+    On subscription Notion POSTs a one-time verification_token — it is logged
+    and echoed so the operator can set NOTION_WEBHOOK_SECRET to it. After
+    that, X-Notion-Signature is verified against the raw body. Notion events
+    carry ids rather than content, so a verified event schedules a targeted
+    connector sync in the background instead of storing the payload.
+    """
+    body = await request.body()
+    payload = json.loads(body)
+    if "verification_token" in payload:
+        logger.info("Notion webhook verification token: %s", payload["verification_token"])
+        return {"status": "verification received — set NOTION_WEBHOOK_SECRET to this token"}
+    if not settings.notion_webhook_secret:
+        raise HTTPException(503, "NOTION_WEBHOOK_SECRET is not configured.")
+    if not _verify_notion_signature(body, request.headers.get("X-Notion-Signature")):
+        raise HTTPException(401, "Invalid webhook signature.")
+    background.add_task(_notion_resync)
+    return {"status": "sync scheduled", "event": payload.get("type")}
 
 
 @app.get("/", tags=["meta"])

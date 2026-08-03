@@ -14,12 +14,16 @@ from app.main import app
 
 _GH_SECRET = "gh-test-secret"
 _SLACK_SECRET = "slack-test-secret"
+_JIRA_SECRET = "jira-test-secret"
+_NOTION_SECRET = "notion-test-secret"
 
 
 @pytest.fixture
 def client(db, monkeypatch):
     monkeypatch.setattr(settings, "github_webhook_secret", _GH_SECRET)
     monkeypatch.setattr(settings, "slack_signing_secret", _SLACK_SECRET)
+    monkeypatch.setattr(settings, "jira_webhook_secret", _JIRA_SECRET)
+    monkeypatch.setattr(settings, "notion_webhook_secret", _NOTION_SECRET)
 
     def override():
         yield db
@@ -130,6 +134,78 @@ def test_webhooks_unconfigured_secret_is_503(client, monkeypatch):
     monkeypatch.setattr(settings, "github_webhook_secret", None)
     res = client.post("/webhooks/github", content=b"{}")
     assert res.status_code == 503
+
+
+def test_jira_webhook_rejects_bad_or_missing_token(client):
+    body = json.dumps({"webhookEvent": "jira:issue_updated"}).encode()
+    assert client.post("/webhooks/jira", content=body).status_code == 401
+    assert client.post("/webhooks/jira?token=wrong", content=body).status_code == 401
+
+
+def test_jira_webhook_stores_issue_with_comment(client, db):
+    payload = {
+        "webhookEvent": "comment_created",
+        "issue": {
+            "key": "PAY-7",
+            "self": "https://acme.atlassian.net/rest/api/2/issue/10007",
+            "fields": {
+                "summary": "Refunds double-charged",
+                "description": "Two captures on one order.",
+                "status": {"name": "In Progress"},
+                "project": {"key": "PAY"},
+                "creator": {"displayName": "Alice"},
+                "created": "2026-07-30T10:00:00.000+0000",
+                "updated": "2026-08-01T09:30:00.000+0000",
+            },
+        },
+        "comment": {"author": {"displayName": "Bob"}, "body": "Fix is in review."},
+    }
+    body = json.dumps(payload).encode()
+    res = client.post(f"/webhooks/jira?token={_JIRA_SECRET}", content=body)
+    assert res.status_code == 200 and res.json()["status"] == "stored"
+    doc = db.scalar(
+        select(RawDocument).where(
+            RawDocument.source_system == "jira", RawDocument.external_id == "PAY-7"
+        )
+    )
+    assert doc is not None
+    assert "Two captures" in doc.content and "Fix is in review." in doc.content
+    assert doc.url == "https://acme.atlassian.net/browse/PAY-7"
+    assert doc.resource_key == "PAY"
+
+
+def test_jira_webhook_ignores_payload_without_issue(client):
+    body = json.dumps({"webhookEvent": "jira:version_released"}).encode()
+    res = client.post(f"/webhooks/jira?token={_JIRA_SECRET}", content=body)
+    assert res.status_code == 200 and res.json()["status"] == "ignored"
+
+
+def _notion_headers(body: bytes) -> dict:
+    sig = "sha256=" + hmac.new(_NOTION_SECRET.encode(), body, hashlib.sha256).hexdigest()
+    return {"X-Notion-Signature": sig}
+
+
+def test_notion_webhook_echoes_verification_token(client):
+    body = json.dumps({"verification_token": "secret-handshake"}).encode()
+    res = client.post("/webhooks/notion", content=body)
+    assert res.status_code == 200 and "verification" in res.json()["status"]
+
+
+def test_notion_webhook_rejects_bad_signature(client):
+    body = json.dumps({"type": "page.content_updated"}).encode()
+    res = client.post(
+        "/webhooks/notion", content=body, headers={"X-Notion-Signature": "sha256=bad"}
+    )
+    assert res.status_code == 401
+
+
+def test_notion_webhook_schedules_targeted_sync(client, monkeypatch):
+    calls = []
+    monkeypatch.setattr("app.main.run_source", lambda db, source, **kw: calls.append(source))
+    body = json.dumps({"type": "page.content_updated", "entity": {"id": "p1"}}).encode()
+    res = client.post("/webhooks/notion", content=body, headers=_notion_headers(body))
+    assert res.status_code == 200 and res.json()["status"] == "sync scheduled"
+    assert calls == ["notion"]
 
 
 def test_metrics_exposes_prometheus_counters(client):

@@ -70,6 +70,11 @@ class Settings(BaseSettings):
     ingest_api_key: str | None = None
     github_webhook_secret: str | None = None
     slack_signing_secret: str | None = None
+    # Notion signs webhook payloads with the verification token it hands out
+    # at subscription time; Jira Cloud cannot sign, so its route is gated by a
+    # shared secret passed as the `token` query parameter.
+    notion_webhook_secret: str | None = None
+    jira_webhook_secret: str | None = None
     oidc_jwks_url: str | None = None
     oidc_audience: str | None = None
     oidc_issuer: str | None = None
