@@ -1,9 +1,11 @@
 """Connector resilience against the real async code (httpx.MockTransport)."""
 
+import json
+
 import httpx
 from sqlalchemy import select, text
 
-from app.connectors import GitHubConnector, JiraConnector, SlackConnector
+from app.connectors import GitHubConnector, JiraConnector, LinearConnector, SlackConnector
 from app.db.models import RawDocument
 
 _gh_calls = {"pulls": 0}
@@ -280,3 +282,75 @@ def test_jira_requires_configuration(db):
         raise AssertionError("expected ValueError")
     except ValueError as exc:
         assert "JIRA_BASE_URL" in str(exc)
+
+
+_LINEAR_ISSUE = {
+    "identifier": "ENG-1",
+    "title": "Fix retry storm",
+    "description": "Client retries amplify the outage.",
+    "url": "https://linear.app/acme/issue/ENG-1",
+    "createdAt": "2026-06-01T08:00:00.000Z",
+    "updatedAt": "2026-06-01T09:00:00.000Z",
+    "state": {"name": "In Progress"},
+    "creator": {"displayName": "Alice"},
+    "comments": {"nodes": [{"body": "Backoff added.", "user": {"displayName": "Bob"}}]},
+}
+_LINEAR_ISSUE_2 = {
+    "identifier": "ENG-2",
+    "title": "Add jitter",
+    "description": None,
+    "url": "https://linear.app/acme/issue/ENG-2",
+    "createdAt": "2026-06-02T08:00:00.000Z",
+    "updatedAt": "2026-06-02T10:15:00.000Z",
+    "state": {"name": "Todo"},
+    "creator": {"displayName": "Bob"},
+    "comments": {"nodes": []},
+}
+
+
+def test_linear_pagination_comments_and_cursor(db):
+    db.execute(text("TRUNCATE raw_documents, ingestion_runs RESTART IDENTITY CASCADE"))
+    db.commit()
+    seen = {"filters": []}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/graphql"
+        body = json.loads(request.content)
+        seen["filters"].append(body["variables"]["filter"])
+        if body["variables"]["after"] is None:
+            page = {
+                "pageInfo": {"hasNextPage": True, "endCursor": "cur1"},
+                "nodes": [_LINEAR_ISSUE],
+            }
+        else:
+            page = {
+                "pageInfo": {"hasNextPage": False, "endCursor": None},
+                "nodes": [_LINEAR_ISSUE_2],
+            }
+        return httpx.Response(200, json={"data": {"issues": page}})
+
+    def connector():
+        return LinearConnector(db, api_key="k", team="ENG", transport=httpx.MockTransport(handler))
+
+    run1, docs1 = connector().run()
+    assert len(docs1) == 2
+    assert run1.cursor == "2026-06-02T10:15:00.000Z"
+    issue = db.scalar(select(RawDocument).where(RawDocument.external_id == "ENG-1"))
+    assert issue.source_system == "linear"
+    assert "Backoff added." in issue.content
+    assert issue.url == "https://linear.app/acme/issue/ENG-1"
+    assert seen["filters"][0] == {"team": {"key": {"eq": "ENG"}}}
+
+    connector().run()
+    assert seen["filters"][-1]["updatedAt"] == {"gt": "2026-06-02T10:15:00.000Z"}
+
+
+def test_linear_requires_api_key(db, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "linear_api_key", None)
+    try:
+        LinearConnector(db)
+        raise AssertionError("expected ValueError")
+    except ValueError as exc:
+        assert "LINEAR_API_KEY" in str(exc)

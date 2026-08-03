@@ -136,6 +136,9 @@ class Settings(BaseSettings):
     jira_email: str | None = None
     jira_api_token: str | None = None
     jira_project: str | None = None
+    linear_api_key: str | None = None
+    linear_team: str | None = None  # optional team key filter, e.g. "ENG"
+    linear_api_url: str = "https://api.linear.app"
 
     @property
     def database_url(self) -> str:
