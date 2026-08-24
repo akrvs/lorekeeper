@@ -17,6 +17,9 @@ def _jwt(payload: dict) -> str:
 
 def test_token_resolves_groups_to_grants(db, monkeypatch):
     monkeypatch.setattr("app.security.identity.settings.rbac_enabled", True)
+    monkeypatch.setattr(
+        "app.security.identity.settings.oidc_trust_gateway_tokens", True
+    )
     db.add(AccessGrant(group_name="eng", source_system="github", resource_key=None))
     db.flush()
 
@@ -24,6 +27,12 @@ def test_token_resolves_groups_to_grants(db, monkeypatch):
     assert principal.subject == "alice"
     assert principal.superuser is False
     assert SourceGrant("github", None) in principal.grants
+
+
+def test_unverified_claims_refused_without_explicit_gateway_trust(db, monkeypatch):
+    monkeypatch.setattr("app.security.identity.settings.rbac_enabled", True)
+    with pytest.raises(PermissionError):
+        IdentityResolver().resolve(db, _jwt({"sub": "alice", "groups": ["eng"]}))
 
 
 def test_rbac_enabled_requires_a_token(db, monkeypatch):
@@ -54,7 +63,12 @@ def test_jwks_verifies_a_signed_token(monkeypatch):
     private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     resolver = _jwks_resolver(monkeypatch, private.public_key())
 
-    token = jwt.encode({"sub": "alice", "groups": ["eng"]}, private, algorithm="RS256")
+    from datetime import UTC, datetime, timedelta
+
+    exp = datetime.now(UTC) + timedelta(hours=1)
+    token = jwt.encode(
+        {"sub": "alice", "groups": ["eng"], "exp": exp}, private, algorithm="RS256"
+    )
     assert resolver._decode(token)["sub"] == "alice"
 
 

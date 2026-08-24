@@ -7,8 +7,9 @@ Behavior:
 
 With `OIDC_JWKS_URL` set the JWT signature is verified against the IdP's JWKS
 (plus audience/issuer when `OIDC_AUDIENCE`/`OIDC_ISSUER` are configured).
-Without it the claims are decoded unverified — acceptable only when the token
-comes from a trusted channel (e.g. injected by your own gateway).
+Without it the claims are decoded unverified — that path refuses to run unless
+`OIDC_TRUST_GATEWAY_TOKENS=true`, which says your own gateway has already
+verified the token before injecting it.
 """
 
 import base64
@@ -70,6 +71,13 @@ class IdentityResolver:
     def _decode(self, token: str) -> dict:
         if settings.oidc_jwks_url:
             return self._decode_verified(token)
+        if not settings.oidc_trust_gateway_tokens:
+            raise PermissionError(
+                "RBAC is enabled without OIDC_JWKS_URL, so tokens cannot be "
+                "verified. Set OIDC_JWKS_URL, or set "
+                "OIDC_TRUST_GATEWAY_TOKENS=true only if your gateway verifies "
+                "the token before injecting it."
+            )
         try:
             return _b64url_json(token.split(".")[1])
         except (IndexError, ValueError, binascii.Error) as exc:
@@ -95,6 +103,7 @@ class IdentityResolver:
                 options={
                     "verify_aud": settings.oidc_audience is not None,
                     "verify_iss": settings.oidc_issuer is not None,
+                    "require": ["exp", "sub"],
                 },
             )
         except jwt.PyJWTError as exc:

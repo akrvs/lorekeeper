@@ -78,6 +78,10 @@ class Settings(BaseSettings):
     oidc_jwks_url: str | None = None
     oidc_audience: str | None = None
     oidc_issuer: str | None = None
+    # Without a JWKS URL the principal token's claims are trusted as-is. That
+    # is only safe when your own gateway injects the token after verifying it,
+    # so it must be turned on deliberately.
+    oidc_trust_gateway_tokens: bool = False
 
     # --- Performance (Track 3) ----------------------------------------------
     embedding_batch_size: int = 256
