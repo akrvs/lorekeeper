@@ -24,7 +24,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.connectors._http import build_async_client, request_with_retries
+from app.connectors._http import assert_upstream_url, build_async_client, request_with_retries
 from app.connectors.base import BaseConnector, RawDoc, run_blocking
 from app.connectors.factory import ConnectorFactory
 
@@ -130,6 +130,8 @@ class GitHubConnector(BaseConnector):
             else:
                 results.extend(page)
             url = _next_link(resp)  # absolute URL or None
+            if url is not None:
+                url = assert_upstream_url(url, str(client.base_url))
             query = None  # the next URL already carries the params
         return results[: self.max_items]
 

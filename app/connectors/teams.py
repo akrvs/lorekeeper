@@ -14,7 +14,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.connectors._http import build_async_client, request_with_retries
+from app.connectors._http import assert_upstream_url, build_async_client, request_with_retries
 from app.connectors.base import BaseConnector, RawDoc, run_blocking
 from app.connectors.factory import ConnectorFactory
 
@@ -83,7 +83,12 @@ class TeamsConnector(BaseConnector):
             resp = await request_with_retries(client, "GET", url)
             data = resp.json()
             results.extend(data.get("value", []))
-            url = data.get("@odata.nextLink")
+            next_link = data.get("@odata.nextLink")
+            url = (
+                assert_upstream_url(next_link, str(client.base_url))
+                if next_link
+                else None
+            )
         return results[: self.max_items]
 
     async def _fetch_all(self) -> list[RawDoc]:

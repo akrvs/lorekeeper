@@ -36,6 +36,31 @@ class ConnectorHTTPError(ConnectorError):
         self.status = status
 
 
+def assert_upstream_url(
+    url: str, base_url: str, *, allowed_suffixes: tuple[str, ...] = ()
+) -> str:
+    """Validate an upstream-supplied URL (pagination links, download targets).
+
+    A malicious or compromised API response could otherwise point the
+    connector - and its Authorization header - at an internal address.
+    Relative URLs are fine (the client resolves them against the pinned base);
+    absolute URLs must land on the pinned host or an explicitly allowed
+    suffix. Returns the url unchanged when acceptable.
+    """
+    candidate = httpx.URL(url)
+    if candidate.host is None:
+        return url
+    expected = httpx.URL(base_url).host
+    if candidate.host == expected:
+        return url
+    if any(candidate.host.endswith(suffix) for suffix in allowed_suffixes):
+        return url
+    raise ConnectorError(
+        f"upstream returned a cross-host url ({candidate.scheme}://{candidate.host}); "
+        "refusing to follow it"
+    )
+
+
 def build_async_client(
     base_url: str,
     headers: dict[str, str],
