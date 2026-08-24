@@ -261,7 +261,8 @@ def cmd_html(db, path: str, node_id: str | None, depth: int, max_nodes: int) -> 
         ],
     }
     with open(path, "w", encoding="utf-8") as fh:
-        fh.write(_HTML.replace("__DATA__", json.dumps(payload, ensure_ascii=False)))
+        data_json = json.dumps(payload, ensure_ascii=False).replace("</", "<\\/")
+        fh.write(_HTML.replace("__DATA__", data_json))
     print(f"{len(payload['nodes'])} nodes, {len(payload['edges'])} edges -> {path}")
     return 0
 
