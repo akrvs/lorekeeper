@@ -42,6 +42,11 @@ async def lifespan(app: FastAPI):
     # the ontology. No SQLAlchemy create_all.
     logger.info("Startup: applying Alembic migrations + seeding ontology...")
     init_db()
+    if not settings.ingest_api_key:
+        logger.warning(
+            "INGEST_API_KEY is not set: POST /ingest/{source} is open to "
+            "anyone who can reach this server and will trigger connector runs."
+        )
     yield
 
 
