@@ -220,9 +220,9 @@ def _verify_slack_signature(body: bytes, timestamp: str | None, signature: str |
     try:
         if not timestamp or abs(time.time() - float(timestamp)) > 300:
             return False
-    except ValueError:
+        base = f"v0:{timestamp}:{body.decode('utf-8')}"
+    except (ValueError, UnicodeDecodeError):
         return False
-    base = f"v0:{timestamp}:{body.decode('utf-8')}"
     expected = (
         "v0="
         + hmac.new(
