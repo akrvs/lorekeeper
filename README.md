@@ -226,13 +226,32 @@ rollback availability) below, and `a`/`r`/`b` to approve, reject, or roll back
 
 Graph-level RBAC is implemented and **defaults OFF**. Flip `RBAC_ENABLED=true`
 and every MCP tool row-filters by the caller's grants: OIDC/JWT → principal →
-groups → `access_grants` → visible `(source_system, resource_key)` set —
-enforced in one place (`GraphRepository`), audited per call (`audit_log`).
-With `OIDC_JWKS_URL` set, JWTs are signature-verified against your IdP's JWKS
-(audience/issuer checked when configured). The REST ingest endpoint can be
-key-gated (`INGEST_API_KEY`). Secrets live in the environment only; prod DB has
-no exposed port; the image runs non-root; the MCP server logs strictly to
-stderr.
+groups → `access_grants` → visible `(source_system, resource_key)` set -
+enforced in one place (`GraphRepository`), audited per call (`audit_log`,
+cache hits included). With `OIDC_JWKS_URL` set, JWTs are signature-verified
+against your IdP's JWKS (audience/issuer checked when configured; `exp` and
+`sub` required). Without it, unverified claims are **refused** unless you set
+`OIDC_TRUST_GATEWAY_TOKENS=true` - an explicit statement that your own gateway
+verifies the token before injecting it. The REST ingest endpoint can be
+key-gated (`INGEST_API_KEY`; startup warns loudly when it is not). Secrets
+live in the environment only; prod DB has no exposed port; the image runs
+non-root; webhook secrets are compared constant-time and never echoed to logs;
+the MCP server logs strictly to stderr.
+
+## [ Patch Notes ] — hardening round
+
+- Unverified principal tokens are refused unless `OIDC_TRUST_GATEWAY_TOKENS`
+  is set explicitly; verified tokens must carry `exp` and `sub`
+- The exported HTML graph escapes `</script>` inside the embedded data, so
+  ingested content can't inject markup into the viewer
+- The Notion webhook no longer logs attacker-supplied verification tokens and
+  gates before parsing; the Jira secret can arrive in an
+  `X-Jira-Webhook-Token` header instead of a query string that proxies log;
+  non-UTF-8 Slack bodies are a 401, not a 500
+- Cached MCP reads are audited exactly like fresh ones - no cache path around
+  the compliance trail
+- GitHub/Slack/Jira webhook handlers offload document storage to the
+  threadpool so one slow Postgres commit can't stall every request
 
 ## [ Loadout ] — write a connector
 
