@@ -17,9 +17,7 @@ def _jwt(payload: dict) -> str:
 
 def test_token_resolves_groups_to_grants(db, monkeypatch):
     monkeypatch.setattr("app.security.identity.settings.rbac_enabled", True)
-    monkeypatch.setattr(
-        "app.security.identity.settings.oidc_trust_gateway_tokens", True
-    )
+    monkeypatch.setattr("app.security.identity.settings.oidc_trust_gateway_tokens", True)
     db.add(AccessGrant(group_name="eng", source_system="github", resource_key=None))
     db.flush()
 
@@ -66,9 +64,7 @@ def test_jwks_verifies_a_signed_token(monkeypatch):
     from datetime import UTC, datetime, timedelta
 
     exp = datetime.now(UTC) + timedelta(hours=1)
-    token = jwt.encode(
-        {"sub": "alice", "groups": ["eng"], "exp": exp}, private, algorithm="RS256"
-    )
+    token = jwt.encode({"sub": "alice", "groups": ["eng"], "exp": exp}, private, algorithm="RS256")
     assert resolver._decode(token)["sub"] == "alice"
 
 
