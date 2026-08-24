@@ -136,6 +136,11 @@ def semantic_search(
         )
         cached = cache.get(key)
         if cached is not None:
+            AuditLogger(db).record(
+                principal,
+                "semantic_search",
+                {"query": query, "node_type": node_type, "cache_hit": True},
+            )
             return cached
 
         try:
@@ -376,6 +381,11 @@ def get_node_neighbors(
         )
         cached = cache.get(key)
         if cached is not None:
+            AuditLogger(db).record(
+                principal,
+                "get_node_neighbors",
+                {"node_id": node_id, "direction": direction, "cache_hit": True},
+            )
             return cached
 
         repo = GraphRepository(db, principal)
