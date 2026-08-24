@@ -253,6 +253,20 @@ the MCP server logs strictly to stderr.
 - GitHub/Slack/Jira webhook handlers offload document storage to the
   threadpool so one slow Postgres commit can't stall every request
 
+## [ New Weapons ]
+
+- **Rate limiting** - `/ingest` and `/webhooks` sit behind a per-client
+  sliding-window budget (`RATE_LIMIT_PER_MINUTE`, default 240; 0 disables),
+  so a flood can't burn LLM spend and upstream API quota. Dependency-free.
+- **Metrics gating** - with `INGEST_API_KEY` set, `/metrics` and `/health/db`
+  demand the same key: graph size and source activity stop being public.
+- **`get_audit_log` MCP tool** - browse the compliance trail from your agent:
+  newest-first entries with subject, tool, params, and result counts.
+  Superusers see everything; scoped principals see only their own trail.
+- **SSRF guard** - connectors validate upstream-supplied URLs (GitHub `Link`
+  pagination, Teams `nextLink`, Zoom transcript downloads) against the pinned
+  API host and refuse cross-host redirects of their credentials.
+
 ## [ Loadout ] — write a connector
 
 Twelve drivers ship: GitHub, Slack, Notion, Jira, Linear, Confluence,
