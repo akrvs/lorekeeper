@@ -30,6 +30,7 @@ from app.cache import get_cache, make_key
 from app.config import settings
 from app.db.init_db import wait_for_db
 from app.db.models.proposal import APPLIED_STATUSES, Proposal
+from app.db.models.security import AuditLog
 from app.db.models.source import IngestionRun
 from app.db.session import SessionLocal, engine
 from app.llm import get_llm_provider
@@ -903,6 +904,50 @@ def rollback_proposal(proposal_id: str, principal_token: str | None = None) -> s
         principal_token: Optional identity token (RBAC: superuser only).
     """
     return _decide_proposal("rollback", proposal_id, principal_token)
+
+
+@mcp.tool()
+def get_audit_log(
+    limit: int = 20, subject: str | None = None, principal_token: str | None = None
+) -> str:
+    """Browse the compliance audit trail of graph queries.
+
+    Every MCP read is recorded here (subject, tool, params, result count),
+    including cache hits. A superuser sees every entry; a scoped principal
+    sees only their own, and may only filter to their own subject.
+
+    Args:
+        limit: Max entries, newest first (default 20, capped at 100).
+        subject: Optional exact subject filter.
+        principal_token: Optional identity token (RBAC).
+    """
+    limit = max(1, min(int(limit), 100))
+    with SessionLocal() as db:
+        try:
+            principal = _principal(db, principal_token)
+        except PermissionError as exc:
+            return f"ERROR: authorization failed ({exc})."
+        if not principal.superuser and subject and subject != principal.subject:
+            return "ERROR: a scoped principal can only read its own audit trail."
+        stmt = select(AuditLog).order_by(AuditLog.occurred_at.desc())
+        effective_subject = principal.subject if not principal.superuser else subject
+        if effective_subject:
+            stmt = stmt.where(AuditLog.subject == effective_subject)
+        rows = db.scalars(stmt.limit(limit)).all()
+        AuditLogger(db).record(principal, "get_audit_log", {"subject": subject}, [])
+        scope = f" for {effective_subject}" if effective_subject else ""
+        if not rows:
+            return f"No audit entries{scope}."
+        lines = [f"{len(rows)} audit entr(y/ies){scope}, newest first:", ""]
+        for row in rows:
+            when = row.occurred_at.isoformat() if row.occurred_at else "?"
+            params = json.dumps(row.params, ensure_ascii=False) if row.params else "{}"
+            if len(params) > 120:
+                params = params[:117] + "..."
+            groups = ",".join(row.groups or []) or "-"
+            lines.append(f"- {when}  {row.subject} [{groups}]")
+            lines.append(f"    {row.tool}  results={row.result_count}  params={params}")
+        return "\n".join(lines)
 
 
 def main() -> None:
