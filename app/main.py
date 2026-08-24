@@ -305,20 +305,29 @@ def _jira_doc(payload: dict) -> RawDoc | None:
 
 @app.post("/webhooks/jira", tags=["ingestion"])
 async def jira_webhook(
-    request: Request, token: str | None = None, db: Session = Depends(get_db)
+    request: Request,
+    token: str | None = None,
+    x_jira_webhook_token: str | None = Header(default=None),
+    db: Session = Depends(get_db),
 ) -> dict:
     """Push-based Jira ingestion (issue and comment events).
 
     Jira Cloud does not sign webhook payloads, so the route is gated by a
-    shared secret: register the webhook URL as
-    /webhooks/jira?token=JIRA_WEBHOOK_SECRET. Issue events land in
-    raw_documents immediately and are extracted on the next pipeline run.
+    shared secret. Prefer registering the webhook with an
+    X-Jira-Webhook-Token header (Jira Cloud sends custom headers); the
+    ?token=JIRA_WEBHOOK_SECRET query form still works but ends up in proxy
+    and access logs. Issue events land in raw_documents immediately and are
+    extracted on the next pipeline run.
     """
     if not settings.jira_webhook_secret:
         raise HTTPException(503, "JIRA_WEBHOOK_SECRET is not configured.")
-    if not (token and secrets.compare_digest(token, settings.jira_webhook_secret)):
+    supplied = x_jira_webhook_token or token
+    if not (supplied and secrets.compare_digest(supplied, settings.jira_webhook_secret)):
         raise HTTPException(401, "Invalid or missing token.")
-    payload = json.loads(await request.body())
+    try:
+        payload = json.loads(await request.body())
+    except ValueError as exc:
+        raise HTTPException(400, "Malformed JSON body.") from exc
     doc = _jira_doc(payload)
     if doc is None:
         return {"status": "ignored", "event": payload.get("webhookEvent")}
