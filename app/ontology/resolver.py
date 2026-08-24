@@ -19,7 +19,7 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 
-from sqlalchemy import func, literal_column, or_, select
+from sqlalchemy import func, literal_column, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -158,8 +158,14 @@ class Resolver:
     ) -> uuid.UUID | None:
         """Find an existing DERIVED node of the same type that matches by name
         (trigram) OR by embedding (cosine), preferring the closest semantic hit."""
+        # The `%` operator (unlike similarity() >= x) is index-accelerated;
+        # set_config(..., true) scopes the threshold to this transaction.
+        self.db.execute(
+            text("SELECT set_config('pg_trgm.similarity_threshold', :threshold, true)"),
+            {"threshold": str(self.NAME_SIM_THRESHOLD)},
+        )
         name_sim = func.similarity(Node.name, name)
-        clauses = [name_sim >= self.NAME_SIM_THRESHOLD]
+        clauses = [Node.name.op("%")(name)]
         order_by = name_sim.desc()
 
         if vec is not None:

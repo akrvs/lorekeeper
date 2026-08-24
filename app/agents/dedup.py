@@ -79,6 +79,7 @@ class Candidate:
     b_id: uuid.UUID
     name_sim: float | None
     vec_dist: float | None
+    dedup_key: str | None = None
 
     @property
     def confidence(self) -> float:
@@ -100,12 +101,14 @@ class DedupAgent(MaintenanceAgent):
             logger.warning("dedup: LLM judge unavailable (%s); filing unjudged proposals", exc)
             judge = None
         filed: list[Proposal] = []
-        for cand in self._candidates():
+        candidates = self._candidates()
+        already_filed = self._already_filed_keys(candidates)
+        for cand in candidates:
             node_a, node_b = self.db.get(Node, cand.a_id), self.db.get(Node, cand.b_id)
             if node_a is None or node_b is None:
                 continue
-            dedup_key = merge_dedup_key(node_a.id, node_b.id)
-            if self._already_filed(dedup_key):
+            dedup_key = cand.dedup_key or merge_dedup_key(node_a.id, node_b.id)
+            if dedup_key in already_filed:
                 continue  # earlier run's decision stands; don't re-judge, don't re-file
             judgment = self._judge(judge, cand, node_a, node_b)
             if (
@@ -208,11 +211,18 @@ class DedupAgent(MaintenanceAgent):
         return "\n".join(lines)
 
     # -- proposal filing ---------------------------------------------------------
-    def _already_filed(self, dedup_key: str) -> bool:
-        count = self.db.scalar(
-            select(func.count()).select_from(Proposal).where(Proposal.dedup_key == dedup_key)
-        )
-        return count > 0
+    def _already_filed_keys(self, candidates: list[Candidate]) -> set[str]:
+        """One round-trip for every candidate's dedup_key existence check."""
+        if not candidates:
+            return set()
+        for cand in candidates:
+            cand.dedup_key = merge_dedup_key(cand.a_id, cand.b_id)
+        rows = self.db.execute(
+            select(Proposal.dedup_key).where(
+                Proposal.dedup_key.in_([c.dedup_key for c in candidates])
+            )
+        ).all()
+        return {row[0] for row in rows}
 
     def _file(
         self,
