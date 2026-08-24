@@ -349,19 +349,32 @@ def _notion_resync() -> None:
 async def notion_webhook(request: Request, background: BackgroundTasks) -> dict:
     """Push-based Notion freshness (page/database change events).
 
-    On subscription Notion POSTs a one-time verification_token — it is logged
-    and echoed so the operator can set NOTION_WEBHOOK_SECRET to it. After
-    that, X-Notion-Signature is verified against the raw body. Notion events
-    carry ids rather than content, so a verified event schedules a targeted
-    connector sync in the background instead of storing the payload.
+    On subscription Notion POSTs a one-time verification_token - it is echoed
+    (masked) so the operator can confirm it matches the value shown in the
+    Notion subscription, then set NOTION_WEBHOOK_SECRET to it out of band.
+    Never copy the token from server logs: until the secret is configured this
+    endpoint is unauthenticated, so anyone could POST their own token. After
+    the secret is set, X-Notion-Signature is verified against the raw body.
+    Notion events carry ids rather than content, so a verified event schedules
+    a targeted connector sync in the background instead of storing the payload.
     """
-    body = await request.body()
-    payload = json.loads(body)
-    if "verification_token" in payload:
-        logger.info("Notion webhook verification token: %s", payload["verification_token"])
-        return {"status": "verification received — set NOTION_WEBHOOK_SECRET to this token"}
     if not settings.notion_webhook_secret:
         raise HTTPException(503, "NOTION_WEBHOOK_SECRET is not configured.")
+    body = await request.body()
+    try:
+        payload = json.loads(body)
+    except ValueError as exc:
+        raise HTTPException(400, "Malformed JSON body.") from exc
+    if "verification_token" in payload:
+        supplied = str(payload["verification_token"])
+        masked = supplied[:3] + "..." + supplied[-3:] if len(supplied) > 8 else "***"
+        logger.info("Notion webhook verification token received (%s)", masked)
+        return {
+            "status": (
+                "verification received - compare it with the token in your "
+                "Notion subscription, then set NOTION_WEBHOOK_SECRET out of band"
+            )
+        }
     if not _verify_notion_signature(body, request.headers.get("X-Notion-Signature")):
         raise HTTPException(401, "Invalid webhook signature.")
     background.add_task(_notion_resync)
