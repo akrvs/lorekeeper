@@ -15,6 +15,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import PlainTextResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -212,7 +213,7 @@ async def github_webhook(request: Request, db: Session = Depends(get_db)) -> dic
     doc = _github_doc(event, json.loads(body))
     if doc is None:
         return {"status": "ignored", "event": event}
-    document = _WebhookSink(db, "github").store(doc)
+    document = await run_in_threadpool(_WebhookSink(db, "github").store, doc)
     return {"status": "stored", "document_id": str(document.id)}
 
 
@@ -269,7 +270,7 @@ async def slack_webhook(request: Request, db: Session = Depends(get_db)) -> dict
         source_created_at=stamp,
         source_updated_at=stamp,
     )
-    document = _WebhookSink(db, "slack").store(doc)
+    document = await run_in_threadpool(_WebhookSink(db, "slack").store, doc)
     return {"status": "stored", "document_id": str(document.id)}
 
 
@@ -331,7 +332,7 @@ async def jira_webhook(
     doc = _jira_doc(payload)
     if doc is None:
         return {"status": "ignored", "event": payload.get("webhookEvent")}
-    document = _WebhookSink(db, "jira").store(doc)
+    document = await run_in_threadpool(_WebhookSink(db, "jira").store, doc)
     return {"status": "stored", "document_id": str(document.id)}
 
 
