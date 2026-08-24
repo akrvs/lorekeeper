@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -31,6 +31,7 @@ from app.db.init_db import init_db
 from app.db.models import Edge, Node, OntologyNodeType, OntologyRelationshipType
 from app.db.session import get_db
 from app.pipeline import run_source
+from app.security.ratelimit import SlidingWindowLimiter
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("company_brain")
@@ -60,13 +61,46 @@ app = FastAPI(
 
 @app.get("/health", tags=["meta"])
 def health() -> dict:
-    """Liveness — does not touch the DB."""
+    """Liveness - does not touch the DB."""
     return {"status": "ok", "version": __version__}
 
 
+_limiter = SlidingWindowLimiter()
+_LIMITED_PREFIXES = ("/ingest", "/webhooks")
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    """A per-client sliding-window budget on /ingest and /webhooks.
+
+    These routes trigger paid LLM work and upstream API fan-out, so a flood
+    here costs real money; everything else stays unlimited.
+    """
+    limit = settings.rate_limit_per_minute
+    path = request.url.path
+    if limit > 0 and any(path.startswith(p) for p in _LIMITED_PREFIXES):
+        client_host = request.client.host if request.client else "unknown"
+        if not _limiter.allow(f"{client_host}:{path}", limit):
+            return JSONResponse({"detail": "rate limit exceeded"}, status_code=429)
+    return await call_next(request)
+
+
+def _require_api_key(x_api_key: str | None) -> None:
+    """When INGEST_API_KEY is configured, /metrics and /health/db demand it:
+    they disclose graph size, ontology contents, and source activity."""
+    required = settings.ingest_api_key
+    if not required:
+        return
+    if not (x_api_key and secrets.compare_digest(x_api_key, required)):
+        raise HTTPException(401, "Invalid or missing X-API-Key header.")
+
+
 @app.get("/health/db", tags=["meta"])
-def health_db(db: Session = Depends(get_db)) -> dict:
+def health_db(
+    x_api_key: str | None = Header(default=None), db: Session = Depends(get_db)
+) -> dict:
     """Readiness — verifies DB connectivity and reports graph size."""
+    _require_api_key(x_api_key)
     nodes = db.scalar(select(func.count()).select_from(Node))
     edges = db.scalar(select(func.count()).select_from(Edge))
     node_types = db.scalar(select(func.count()).select_from(OntologyNodeType))
@@ -79,8 +113,11 @@ def health_db(db: Session = Depends(get_db)) -> dict:
 
 
 @app.get("/metrics", tags=["meta"])
-def metrics(db: Session = Depends(get_db)) -> PlainTextResponse:
+def metrics(
+    x_api_key: str | None = Header(default=None), db: Session = Depends(get_db)
+) -> PlainTextResponse:
     """Prometheus metrics in text exposition format."""
+    _require_api_key(x_api_key)
     from app.db.models import Proposal
     from app.db.models.source import IngestionRun, RawDocument
 

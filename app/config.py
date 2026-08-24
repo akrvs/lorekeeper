@@ -59,6 +59,10 @@ class Settings(BaseSettings):
     http_backoff_base_seconds: float = 1.0
     http_backoff_max_seconds: float = 60.0
 
+    # Per-client-per-minute request budget shared by /ingest and /webhooks.
+    # 0 disables the limiter entirely.
+    rate_limit_per_minute: int = 240
+
     # --- Ingestion / extraction limits --------------------------------------
     ingest_max_items: int = 200  # safety cap on items pulled per run
     extraction_max_chars: int = 12000  # chars of a document sent to the LLM
