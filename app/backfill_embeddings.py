@@ -64,7 +64,7 @@ def run_backfill(db, *, batch_size: int, limit: int | None, dry_run: bool) -> di
     for start in range(0, len(nodes), batch_size):
         chunk = nodes[start : start + batch_size]
         vectors = provider.embed([_embed_text(n) for n in chunk])
-        for node, vec in zip(chunk, vectors):
+        for node, vec in zip(chunk, vectors, strict=False):
             node.embedding = vec
             _stamp(node, model_name)
         db.commit()
