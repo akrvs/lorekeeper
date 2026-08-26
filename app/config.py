@@ -103,6 +103,10 @@ class Settings(BaseSettings):
     # Slack-compatible incoming webhook; unset means the digest prints to stdout.
     digest_webhook_url: str | None = None
 
+    # --- Backups ---------------------------------------------------------------
+    backup_dir: str = "./backups"
+    backup_keep: int = 14
+
     # --- Proposals / self-maintenance ----------------------------------------
     # Proposals at/above this confidence apply without human review (still
     # audited + rollback-able). None (the default) disables autonomy entirely:
