@@ -71,12 +71,16 @@ class IdentityResolver:
     def _decode(self, token: str) -> dict:
         if settings.oidc_jwks_url:
             return self._decode_verified(token)
+        from app.security.local_tokens import decode_local, looks_like_local_token
+
+        if settings.local_token_signing_key and looks_like_local_token(token):
+            return decode_local(token)
         if not settings.oidc_trust_gateway_tokens:
             raise PermissionError(
                 "RBAC is enabled without OIDC_JWKS_URL, so tokens cannot be "
-                "verified. Set OIDC_JWKS_URL, or set "
-                "OIDC_TRUST_GATEWAY_TOKENS=true only if your gateway verifies "
-                "the token before injecting it."
+                "verified. Set OIDC_JWKS_URL, configure LOCAL_TOKEN_SIGNING_KEY "
+                "to mint local tokens, or set OIDC_TRUST_GATEWAY_TOKENS=true "
+                "only if your gateway verifies the token before injecting it."
             )
         try:
             return _b64url_json(token.split(".")[1])

@@ -86,6 +86,9 @@ class Settings(BaseSettings):
     # is only safe when your own gateway injects the token after verifying it,
     # so it must be turned on deliberately.
     oidc_trust_gateway_tokens: bool = False
+    # Enables locally minted HS256 tokens (python -m app.security.local_tokens)
+    # for RBAC without an external IdP. Signature + expiry always enforced.
+    local_token_signing_key: str | None = None
 
     # --- Performance (Track 3) ----------------------------------------------
     embedding_batch_size: int = 256
