@@ -972,9 +972,7 @@ def get_connector_health(principal_token: str | None = None) -> str:
             select(
                 IngestionRun.source_system,
                 func.count(),
-                func.sum(
-                    case((IngestionRun.status == "failed", 1), else_=0)
-                ),
+                func.sum(case((IngestionRun.status == "failed", 1), else_=0)),
                 func.max(IngestionRun.finished_at),
             ).group_by(IngestionRun.source_system)
         ).all()
@@ -988,9 +986,7 @@ def get_connector_health(principal_token: str | None = None) -> str:
                 IngestionRun.source_system,
                 IngestionRun.status,
                 func.max(IngestionRun.finished_at),
-            ).group_by(
-                IngestionRun.source_system, IngestionRun.status
-            )
+            ).group_by(IngestionRun.source_system, IngestionRun.status)
         ).all():
             current = last_status.get(source)
             if current is None or (finished and finished >= current[1]):
@@ -1002,9 +998,7 @@ def get_connector_health(principal_token: str | None = None) -> str:
             failed_n = int(failures or 0)
             rate = 100.0 * failed_n / total_n if total_n else 0.0
             when = (
-                last_finished.isoformat(timespec="minutes")
-                if last_finished
-                else "(never finished)"
+                last_finished.isoformat(timespec="minutes") if last_finished else "(never finished)"
             )
             flag = "FAILING" if rate >= 50 else "ok"
             lines.append(
@@ -1056,9 +1050,8 @@ def get_node_timeline(node_id: str, principal_token: str | None = None) -> str:
             lines.append("(no source documents reference this entity)")
         for mention, document in mention_rows:
             when = (
-                (document.source_created_at or document.ingested_at or document.created_at)
-                or None
-            )
+                document.source_created_at or document.ingested_at or document.created_at
+            ) or None
             stamp = when.date().isoformat() if when else "????-??-??"
             title = document.title or f"{document.source_type} {document.external_id}"
             line = f"- {stamp}  [{document.source_system}] {title}"
@@ -1067,7 +1060,7 @@ def get_node_timeline(node_id: str, principal_token: str | None = None) -> str:
             lines.append(line)
             if mention.context:
                 snippet = mention.context.strip().replace("\n", " ")[:160]
-                lines.append(f"      \"{snippet}\"")
+                lines.append(f'      "{snippet}"')
         return "\n".join(lines)
 
 

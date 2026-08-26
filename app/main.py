@@ -96,9 +96,7 @@ def _require_api_key(x_api_key: str | None) -> None:
 
 
 @app.get("/health/db", tags=["meta"])
-def health_db(
-    x_api_key: str | None = Header(default=None), db: Session = Depends(get_db)
-) -> dict:
+def health_db(x_api_key: str | None = Header(default=None), db: Session = Depends(get_db)) -> dict:
     """Readiness — verifies DB connectivity and reports graph size."""
     _require_api_key(x_api_key)
     nodes = db.scalar(select(func.count()).select_from(Node))

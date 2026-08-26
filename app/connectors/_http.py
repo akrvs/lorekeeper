@@ -36,9 +36,7 @@ class ConnectorHTTPError(ConnectorError):
         self.status = status
 
 
-def assert_upstream_url(
-    url: str, base_url: str, *, allowed_suffixes: tuple[str, ...] = ()
-) -> str:
+def assert_upstream_url(url: str, base_url: str, *, allowed_suffixes: tuple[str, ...] = ()) -> str:
     """Validate an upstream-supplied URL (pagination links, download targets).
 
     A malicious or compromised API response could otherwise point the

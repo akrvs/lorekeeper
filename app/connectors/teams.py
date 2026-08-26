@@ -84,11 +84,7 @@ class TeamsConnector(BaseConnector):
             data = resp.json()
             results.extend(data.get("value", []))
             next_link = data.get("@odata.nextLink")
-            url = (
-                assert_upstream_url(next_link, str(client.base_url))
-                if next_link
-                else None
-            )
+            url = assert_upstream_url(next_link, str(client.base_url)) if next_link else None
         return results[: self.max_items]
 
     async def _fetch_all(self) -> list[RawDoc]:
