@@ -267,6 +267,25 @@ the MCP server logs strictly to stderr.
   pagination, Teams `nextLink`, Zoom transcript downloads) against the pinned
   API host and refuse cross-host redirects of their credentials.
 
+## [ Round Two ]
+
+- **Digest delivery** - `python -m app.digest_delivery` builds the weekly
+  digest and posts it to a Slack-compatible webhook
+  (`DIGEST_WEBHOOK_URL`, `DIGEST_DAYS`); without one it prints to stdout.
+- **`get_connector_health` MCP tool** - per-source run counts, failure rates,
+  and last outcome: answers "is the brain still eating?" at a glance.
+- **Backups with retention** - `python -m app.backup run --keep N` takes
+  labeled pg_dump snapshots into `BACKUP_DIR`, prunes beyond the newest N,
+  and `restore` prints the exact command to bring one back.
+- **Embedding backfill** - switched embedding models? `python -m app.backfill_embeddings`
+  re-embeds every node in batches and stamps the model name into node
+  properties so drift is detectable. `--dry-run` counts first.
+- **`get_node_timeline` MCP tool** - replays an entity's story: every source
+  document that mentioned it, oldest first, with snippets.
+- **Local RBAC tokens** - no IdP? Set `LOCAL_TOKEN_SIGNING_KEY`, mint expiring
+  HS256 principal tokens with `python -m app.security.local_tokens`, and the
+  resolver verifies signature + expiry like any OIDC token.
+
 ## [ Loadout ] — write a connector
 
 Twelve drivers ship: GitHub, Slack, Notion, Jira, Linear, Confluence,
