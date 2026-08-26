@@ -29,9 +29,10 @@ from sqlalchemy import case, func, select
 from app.cache import get_cache, make_key
 from app.config import settings
 from app.db.init_db import wait_for_db
+from app.db.models import NodeMention
 from app.db.models.proposal import APPLIED_STATUSES, Proposal
 from app.db.models.security import AuditLog
-from app.db.models.source import IngestionRun
+from app.db.models.source import IngestionRun, RawDocument
 from app.db.session import SessionLocal, engine
 from app.llm import get_llm_provider
 from app.proposals import ProposalEngine, ProposalError
@@ -1010,6 +1011,63 @@ def get_connector_health(principal_token: str | None = None) -> str:
                 f"- {source}: {total_n} run(s), {rate:.0f}% failed, "
                 f"last {last_status.get(source, ('?', None))[0]} at {when} [{flag}]"
             )
+        return "\n".join(lines)
+
+
+@mcp.tool()
+def get_node_timeline(node_id: str, principal_token: str | None = None) -> str:
+    """How an entity's story unfolded: every source document that mentioned it.
+
+    Ordered oldest first with each document's date, title, and URL - the trail
+    a human reviewer needs to see how facts accumulated (and when they changed).
+
+    Args:
+        node_id: UUID from semantic_search or get_node_details.
+        principal_token: Optional identity token to scope results (RBAC).
+    """
+    nid = _parse_uuid(node_id)
+    if nid is None:
+        return f"ERROR: '{node_id}' is not a valid UUID."
+    with SessionLocal() as db:
+        try:
+            principal = _principal(db, principal_token)
+        except PermissionError as exc:
+            return f"ERROR: authorization failed ({exc})."
+        repo = GraphRepository(db, principal)
+        node = repo.get_node(nid)
+        if node is None:
+            return f"No node found with id {node_id} (or not authorized)."
+
+        mention_rows = db.execute(
+            select(NodeMention, RawDocument)
+            .join(RawDocument, RawDocument.id == NodeMention.document_id)
+            .where(NodeMention.node_id == nid)
+            .order_by(RawDocument.source_created_at.asc().nulls_last())
+            .limit(200)
+        ).all()
+
+        AuditLogger(db).record(principal, "get_node_timeline", {"node_id": node_id}, [nid])
+        lines = [
+            f"TIMELINE for {_node_line(node.name, node.node_type, node.id)}",
+            f"first seen {node.created_at.isoformat() if node.created_at else '?'}",
+            "",
+        ]
+        if not mention_rows:
+            lines.append("(no source documents reference this entity)")
+        for mention, document in mention_rows:
+            when = (
+                (document.source_created_at or document.ingested_at or document.created_at)
+                or None
+            )
+            stamp = when.date().isoformat() if when else "????-??-??"
+            title = document.title or f"{document.source_type} {document.external_id}"
+            line = f"- {stamp}  [{document.source_system}] {title}"
+            if document.url:
+                line += f"  {document.url}"
+            lines.append(line)
+            if mention.context:
+                snippet = mention.context.strip().replace("\n", " ")[:160]
+                lines.append(f"      \"{snippet}\"")
         return "\n".join(lines)
 
 
