@@ -24,7 +24,7 @@ import sys
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 
 from app.cache import get_cache, make_key
 from app.config import settings
@@ -947,6 +947,69 @@ def get_audit_log(
             groups = ",".join(row.groups or []) or "-"
             lines.append(f"- {when}  {row.subject} [{groups}]")
             lines.append(f"    {row.tool}  results={row.result_count}  params={params}")
+        return "\n".join(lines)
+
+
+@mcp.tool()
+def get_connector_health(principal_token: str | None = None) -> str:
+    """Per-source ingestion health: run counts, failure rate, last outcome.
+
+    Answers "is the brain still eating?" without digging through logs. A
+    source that has never run or keeps failing shows up immediately.
+
+    Args:
+        principal_token: Optional identity token (RBAC: superuser only).
+    """
+    with SessionLocal() as db:
+        try:
+            principal = _principal(db, principal_token)
+        except PermissionError as exc:
+            return f"ERROR: authorization failed ({exc})."
+        if not principal.superuser:
+            return "ERROR: connector health is a superuser view."
+        rows = db.execute(
+            select(
+                IngestionRun.source_system,
+                func.count(),
+                func.sum(
+                    case((IngestionRun.status == "failed", 1), else_=0)
+                ),
+                func.max(IngestionRun.finished_at),
+            ).group_by(IngestionRun.source_system)
+        ).all()
+        AuditLogger(db).record(principal, "get_connector_health", {}, [])
+        if not rows:
+            return "No ingestion runs recorded yet - nothing to report."
+
+        last_status = {}
+        for source, status, finished in db.execute(
+            select(
+                IngestionRun.source_system,
+                IngestionRun.status,
+                func.max(IngestionRun.finished_at),
+            ).group_by(
+                IngestionRun.source_system, IngestionRun.status
+            )
+        ).all():
+            current = last_status.get(source)
+            if current is None or (finished and finished >= current[1]):
+                last_status[source] = (status, finished)
+
+        lines = [f"INGESTION HEALTH - {len(rows)} source(s):", ""]
+        for source, total, failures, last_finished in rows:
+            total_n = int(total or 0)
+            failed_n = int(failures or 0)
+            rate = 100.0 * failed_n / total_n if total_n else 0.0
+            when = (
+                last_finished.isoformat(timespec="minutes")
+                if last_finished
+                else "(never finished)"
+            )
+            flag = "FAILING" if rate >= 50 else "ok"
+            lines.append(
+                f"- {source}: {total_n} run(s), {rate:.0f}% failed, "
+                f"last {last_status.get(source, ('?', None))[0]} at {when} [{flag}]"
+            )
         return "\n".join(lines)
 
 
