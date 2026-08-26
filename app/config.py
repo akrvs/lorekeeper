@@ -98,6 +98,11 @@ class Settings(BaseSettings):
     sync_sources: str | None = None
     sync_interval_seconds: int = 3600
 
+    # --- Digest delivery -----------------------------------------------------
+    digest_days: int = 7
+    # Slack-compatible incoming webhook; unset means the digest prints to stdout.
+    digest_webhook_url: str | None = None
+
     # --- Proposals / self-maintenance ----------------------------------------
     # Proposals at/above this confidence apply without human review (still
     # audited + rollback-able). None (the default) disables autonomy entirely:
